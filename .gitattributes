@@ -1,0 +1,6 @@
+# The BIP-340 vector file is vendored from bitcoin/bips byte-for-byte, and its
+# sha256 is pinned in src/vectors/PROVENANCE.md and asserted by
+# src/crypto/bip340-kat.test.ts. The upstream file uses CRLF line endings, so any
+# eol normalisation changes its bytes and breaks that pin -- on a fresh clone only,
+# which means CI and not the machine that wrote it. Keep it untouched.
+src/vectors/bip340-test-vectors.csv -text
