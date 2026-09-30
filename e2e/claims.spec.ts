@@ -211,13 +211,42 @@ test.describe('Vectors and fixtures — counts must agree with the rows', () => 
     const rows = page.locator('#panel-vectors table').first().locator('tbody tr')
     const rowCount = await rows.count()
     const summary = await fieldValue(page, '#panel-vectors', 'ROWS MATCHING THE PUBLISHED RESULT')
-    // CROSS-CHECK: "19 of 19" must match the number of rows actually rendered.
     const [matched, total] = summary.trim().split(' of ').map((n) => Number(n.trim()))
     expect(total).toBe(rowCount)
-    const matchPills = rows.locator('.pill-ok', { hasText: 'match' })
-    expect(matched).toBe(await matchPills.count())
+
+    // INDEPENDENT RE-DERIVATION of every row's verdict from the two values that
+    // row prints, rather than from the badge it prints beside them.
+    //
+    // This is deliberately NOT a comparison of the counter against the pills.
+    // That version of this test was written first and a mutation defeated it:
+    // inverting the `ok` comparison in ui/vectors.ts flips the pills AND the
+    // counter together, so "0 of 19" still agreed with zero match pills and the
+    // test stayed green while every row on the page was wrong. A page can be
+    // consistently wrong, and a check that only asks the page to agree with
+    // itself cannot see it.
+    const cells = await rows.evaluateAll((trs) =>
+      trs.map((tr) => ({
+        expected: (tr.children[4] as HTMLElement).innerText.trim(),
+        computed: (tr.children[5] as HTMLElement).innerText.trim(),
+        badge: (tr.children[6] as HTMLElement).innerText.trim(),
+      })),
+    )
+    expect(cells.length).toBe(rowCount)
+    let agree = 0
+    for (const [i, c] of cells.entries()) {
+      expect(c.expected.length, `row ${i} must print its expected verdict`).toBeGreaterThan(0)
+      expect(c.computed.length, `row ${i} must print its computed verdict`).toBeGreaterThan(0)
+      const same = c.expected === c.computed
+      // the badge must say what the two printed values actually say
+      expect(/MISMATCH/.test(c.badge), `row ${i} badge must follow its own two values`).toBe(!same)
+      if (same) agree++
+    }
+    // The library is correct against BIP-340, so every row's two values agree...
+    expect(agree).toBe(rowCount)
+    // ...and the counter must report that number.
+    expect(matched).toBe(agree)
     // MUTATION TARGET: invert the `ok` comparison in ui/vectors.ts
-    // (`computed !== v.expected`). Every row flips to MISMATCH and this fails.
+    // (`computed !== v.expected`). Every badge then contradicts its own row.
   })
 
   test('PARTS SUM TO WHOLE: the three vector classes account for every row', async ({ page }) => {
