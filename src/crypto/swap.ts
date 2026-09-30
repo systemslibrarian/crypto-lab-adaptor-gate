@@ -133,7 +133,7 @@ export function runSwap(opts: SwapOptions): SwapRun {
     push(
       'Bob pre-verifies what Alice sent',
       bobPre.ok
-        ? "s-hat_A * G == R_adj + e * P_A against the payment's T. Accepted."
+        ? "s\u0302_A\u00b7G == R_adj + e\u00b7P_A against the payment's T. Accepted."
         : `REJECTED: ${bobPre.reason}. Bob stops here and loses nothing.`,
       bobPre.ok ? 'ok' : 'blocked',
     )
@@ -160,7 +160,7 @@ export function runSwap(opts: SwapOptions): SwapRun {
   if (earlySig === null) {
     earlyClaimReason =
       'Ledger B holds no spend yet, so there are no bytes to extract t from. ' +
-      "Bob's claim is not forbidden by a rule -- it is not computable."
+      "Bob's claim is not forbidden by a rule \u2014 it is not computable."
   } else {
     earlyClaimPossible = true
     earlyClaimReason = 'unexpected: ledger B already held a spend'
@@ -181,7 +181,7 @@ export function runSwap(opts: SwapOptions): SwapRun {
       push(
         'Alice publishes s_B on ledger B',
         `Ledger B accepted the signature and paid Alice. Publishing it also published t ` +
-          `to anyone holding s-hat_B -- which is Bob.`,
+          `to anyone holding s\u0302_B \u2014 which is Bob.`,
       )
     } else {
       push('Alice publishes s_B on ledger B', `Ledger B rejected it: ${pubB.reason}`, 'blocked')
@@ -196,7 +196,7 @@ export function runSwap(opts: SwapOptions): SwapRun {
         bobExtractedTCorrect = ex.t === real.t
         push(
           'Bob reads ledger B and extracts t',
-          `t = s_B - s-hat_B (parity ${preB.parity}) from the published bytes. ` +
+          `t = s_B \u2212 s\u0302_B (parity ${preB.parity}) from the published bytes. ` +
             `Recovered t*G == T: ${bobExtractedTCorrect ? 'yes' : 'no'}.`,
         )
       } else {
@@ -215,7 +215,7 @@ export function runSwap(opts: SwapOptions): SwapRun {
       } else {
         push(
           'Bob publishes s_A on ledger A',
-          `Ledger A REJECTED it: ${pubA.reason}. Bob extracted the correct t -- ` +
+          `Ledger A REJECTED it: ${pubA.reason}. Bob extracted the correct t \u2014 ` +
             `Alice's pre-signature was against a different T, so no t could have completed it.`,
           'alarm',
         )
