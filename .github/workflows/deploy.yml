@@ -63,6 +63,12 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
       options: --ipc=host
+    env:
+      # Firefox refuses to launch when $HOME is not owned by the current user, and
+      # the Actions runner mounts its own HOME into the container. Playwright names
+      # this fix in its own launch error. Chromium and WebKit are unaffected, so
+      # without it the run is 101 passed / 15 failed and every failure is Firefox.
+      HOME: /root
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
