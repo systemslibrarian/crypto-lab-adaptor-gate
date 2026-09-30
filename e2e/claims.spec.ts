@@ -667,14 +667,28 @@ test.describe('Page-level honesty checks', () => {
     }
   })
 
-  test('no --accent is defined on :root, and the page still paints its accent', async ({ page }) => {
-    // This lab deliberately leaves --accent unset (assigned centrally). The
-    // fallbacks must therefore actually work, or the page renders unstyled edges.
+  test('the assigned --accent is on :root, and the fallback still paints without it', async ({ page }) => {
+    // The accent was assigned centrally on 2026-09-30 (#ff6b7f), so the premise of
+    // this test changed: it used to assert --accent was UNSET. The half worth
+    // keeping is the second one — every use site reads `var(--accent, #35d6bb)`
+    // and the fallback has to actually paint, because 58 of 216 labs still define
+    // no --accent and a use site that assumes one is a fleet-wide hazard. So this
+    // now pins the assigned value AND re-checks the fallback with it removed.
     await boot(page)
     const accent = await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
     )
-    expect(accent).toBe('')
+    expect(accent, 'the centrally assigned accent must be on :root').toBe('#ff6b7f')
+
+    const withoutAccent = await page.evaluate(() => {
+      document.documentElement.style.setProperty('--accent', 'initial')
+      const el = document.querySelector('.tab-btn[aria-selected="true"]') as HTMLElement | null
+      const painted = el ? getComputedStyle(el).borderTopColor : ''
+      document.documentElement.style.removeProperty('--accent')
+      return painted
+    })
+    expect(withoutAccent, 'the var() fallback must paint when --accent is absent').not.toBe('rgba(0, 0, 0, 0)')
+    expect(withoutAccent).not.toBe('')
     const tabBorder = await page
       .locator('.tab-btn[aria-selected="true"]')
       .evaluate((n) => getComputedStyle(n).borderTopColor)

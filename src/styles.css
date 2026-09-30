@@ -1,6 +1,7 @@
 /* Adaptor Gate — stylesheet.
  *
- * ON --accent: this lab deliberately does NOT define --accent on :root.
+ * ON --accent: assigned centrally on 2026-09-30 as #ff6b7f. The note below records
+ * why it stayed blank until then, and why the fallback is kept.
  *
  * Template section 3.0 item 3 asks each lab to define it, and the conflict is
  * recorded rather than resolved quietly: the catalog assigns accents centrally
@@ -15,8 +16,14 @@
  */
 
 :root {
-  /* ACCENT ASSIGNMENT GOES HERE — one line, e.g. `--accent: #9f88ff;`
-     Assigned centrally against the 4-, 2- and 1-column catalog layouts. */
+  /* Assigned centrally on 2026-09-30 against the 4-column catalog layout: this card
+     lands at index 24 of the public-key section, row 6 column 0, so it has no left
+     neighbour and Token Tell (#35d6bb) above it. Crimson is free of that, and of
+     SM9 Forge (#ffb84d) which precedes it in reading order. Schnorr Forge is
+     #ffb84d but three rows away, so it does not constrain this. On-palette, as the
+     note at the top of this file asks. */
+  --accent: #ff6b7f;
+  --accent-ink: #120d2a; /* 6.86:1 on the accent fill — never near-white */
 
   color-scheme: dark;
   --bg: #0d1117;

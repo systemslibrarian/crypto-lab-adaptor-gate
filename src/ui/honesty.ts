@@ -208,8 +208,8 @@ export function renderHonesty(root: HTMLElement): void {
             'ASIACRYPT 2021, pp. 635-664 (ePrint 2020/476) — the game-based security ' +
             'definitions the field standardised on. Their paper describes itself as the first ' +
             'standalone formalization; priority is contested. Fournier, "One-Time Verifiably ' +
-            'Encrypted Signatures A.K.A. Adaptor Signatures" (October 2019) claims the same ground ' +
-            'six months earlier, and Aumayr et al. cite it as concurrent and weaker while Gerhart ' +
+            'Encrypted Signatures A.K.A. Adaptor Signatures" (2019) claims the same ground and ' +
+            'predates it, and Aumayr et al. cite it as concurrent and weaker while Gerhart ' +
             'et al. do not cite it at all. Both are reported here rather than adjudicated.',
         }),
         el('li', {
