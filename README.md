@@ -75,20 +75,26 @@ anything of value.
 
 ## Exhibits
 
-1. **The Relation** — the headline, in four steps. Lock a secret behind a point; pre-sign
-   against it and watch BIP-340 `verify` reject the pre-signature while pre-verification
-   accepts it; supply `t` and get a signature the library accepts; then recover `t` from
-   nothing but the pre-signature and the published signature. The difference strip renders
-   `s − ŝ` beside the true `t` with a computed equality badge — **supply a wrong `t` and it
-   goes red**, which is what makes the green state evidence rather than decoration.
-2. **Cross-Ledger Swap** — two modeled ledgers, in order, because the order is the lesson.
-   Alice completes Bob's pre-signature and publishes; Bob reads those bytes *off ledger B*
-   and extracts `t`; Bob claims on ledger A. Two toggles: Bob skips pre-verification, and
-   Alice pre-signs against a different `T`. Each alone is harmless; together they are a
-   total loss, with every check Bob ran still reporting success.
-3. **PTLC vs HTLC** — three hops, both strips computed from one run. Three distinct adaptor
-   points against one repeated hash. Settlement propagates backward hop by hop, and each
-   intermediary derives its own secret by adding the blinding scalar it was handed.
+1. **The Relation** — the headline, reachable in **one action**. Press *Run the relation*
+   and four computed stages appear: lock a secret behind a point; pre-sign against it and
+   watch BIP-340 `verify` reject the pre-signature while pre-verification accepts it; add
+   `t` and get a signature the library accepts; subtract the two and read `t` back out. The
+   mechanism is drawn as the dominant object, and the subtraction wears `t`'s colour only
+   when the computed equality holds — **press *Try a wrong t* and it goes red**, which is
+   what makes the green state evidence rather than decoration. Every raw value lives behind
+   *Inspect exact values*; you can also step the four stages one at a time.
+2. **Cross-Ledger Swap** — two modeled ledgers, advanced **one transition at a time**,
+   because the order is the lesson and an exhibit that prints its ending hides what produced
+   it. Actor lanes show who knows `t`, who holds which pre-signature, and what each ledger
+   has published at that moment. Alice completes Bob's pre-signature and publishes; Bob
+   reads those bytes *off ledger B* and extracts `t`; Bob claims on ledger A. Two toggles:
+   Bob skips pre-verification, and Alice pre-signs against a different `T`. Each alone is
+   harmless; together they are a total loss, with every check Bob ran still reporting success.
+3. **PTLC vs HTLC** — three hops, both strips computed from one run: three distinct adaptor
+   points against one repeated hash. Settlement is **causal**, not narrated — it starts at
+   the last hop, and each hop can only be completed with the secret its payee *derived* from
+   the hop below it (extracted value plus its own blinding). Corrupt any hop's published
+   signature and every hop upstream of it stalls, while hops downstream are unaffected.
 4. **Break It** — the naive-nonce toggle makes two pre-signatures on one message share a
    nonce; the key falls out and a forged signature on a fresh message is accepted by the
    library. A second toggle shows the edge case where the nonce *is* reused and the key is
@@ -118,6 +124,20 @@ anything of value.
 
 **https://systemslibrarian.github.io/crypto-lab-adaptor-gate/**
 
+The active exhibit and the important failure modes live in the URL, so a link restores
+exactly what you were looking at and survives refresh and Back. A presenter path:
+
+| | |
+|---|---|
+| the relation | [`#e=relation&stage=4`](https://systemslibrarian.github.io/crypto-lab-adaptor-gate/#e=relation&stage=4) |
+| the headline falsified | [`#e=relation&stage=4&t=wrong`](https://systemslibrarian.github.io/crypto-lab-adaptor-gate/#e=relation&stage=4&t=wrong) |
+| an honest swap | [`#e=swap&sc=7`](https://systemslibrarian.github.io/crypto-lab-adaptor-gate/#e=swap&sc=7) |
+| the swap loss | [`#e=swap&cheat=1&skip=1&sc=7`](https://systemslibrarian.github.io/crypto-lab-adaptor-gate/#e=swap&cheat=1&skip=1&sc=7) |
+| PTLC, chain broken | [`#e=ptlc&corrupt=2&hops=3`](https://systemslibrarian.github.io/crypto-lab-adaptor-gate/#e=ptlc&corrupt=2&hops=3) |
+| nonce reuse | [`#e=break&naive=1`](https://systemslibrarian.github.io/crypto-lab-adaptor-gate/#e=break&naive=1) |
+
+Inputs are deterministic, so two people opening the same link see the same proof.
+
 Pre-sign a message and watch the real verifier refuse the pre-signature; complete it with a
 wrong `t` and watch the headline badge go red and the verifier refuse the result; complete
 it with the real one and read the secret back out; run the swap honestly and then break it
@@ -144,6 +164,15 @@ all 19 BIP-340 vectors and the fixture table, including the row that fails on pu
 - **A wrong-`T` pre-signature is not malformed.** It pre-verifies perfectly against the
   point it was actually built for. Nothing detects it except pre-verifying against the `T`
   the payment names.
+- **A right answer reached by a wrong causal chain is still wrong.** The PTLC exhibit
+  originally computed every hop secret up front and settled each hop with its own
+  precomputed value while displaying the extracted one beside it. Every number matched, the
+  screen said settlement propagates backward, and a test proved the derivation *could* work
+  — but the state transition took a shortcut, so corrupting a downstream signature would not
+  have stopped an upstream hop. It is fixed structurally rather than by comment: settlement
+  has access to exactly one secret and can complete a hop with nothing else. The tests that
+  distinguish the two are the wrong-blinding cases, because only a fault that makes the
+  derived value differ from the precomputed one can tell them apart.
 - **The library has a fail-open precondition at the identity point.** `Point.ZERO.toBytes()`
   throws, but `Point.ZERO.x` returns `0n` and `hasEvenY()` returns `true`, both silently.
   A layer that reads `x(R+T)` or its parity straight off the library would compute a
@@ -191,11 +220,12 @@ Playwright browsers: `npx playwright install --with-deps chromium firefox webkit
 
 ```bash
 npm run build       # tsc --noEmit && vite build
-npm test            # 114 unit tests across 7 files (Vitest)
-npm run test:a11y   # 77 browser tests: axe WCAG gate, claims suite, flows in 4 browsers
+npm test            # 124 unit tests across 7 files (Vitest)
+npm run test:a11y   # 115 browser tests: axe WCAG gate, claims, visual snapshots,
+                    # and functional flows in 4 browsers
 ```
 
-**Unit tests — 114, all passing.**
+**Unit tests — 124, all passing.**
 
 | suite | what it pins |
 |---|---|
@@ -205,7 +235,7 @@ npm run test:a11y   # 77 browser tests: axe WCAG gate, claims suite, flows in 4 
 | `src/crypto/adaptor-independent.test.ts` | **The independent re-derivation.** A self-contained affine BigInt secp256k1 — its own modular inverse, point addition, ladder, `lift_x` and tagged hash — that imports neither `adaptor.ts` nor the library's `Point`, and agrees on every intermediate value. |
 | `src/crypto/attacks.test.ts` | Nonce-reuse recovery on both algebraic branches, with a test proving the sum branch is load-bearing. |
 | `src/crypto/swap.test.ts` | Swap atomicity, the ledger's real signature checks, and the wrong-`T` loss. |
-| `src/crypto/ptlc.test.ts` | Per-hop decorrelation, backward settlement, and the blinding being load-bearing. |
+| `src/crypto/ptlc.test.ts` | Per-hop decorrelation, and the **causality** of settlement: that each hop consumes the value extracted from the hop below it, and that corrupting a signature or a blinding stalls every hop upstream while leaving those downstream untouched. |
 
 **KAT files.** `src/vectors/bip340-test-vectors.csv`, vendored byte-for-byte from
 `bip-0340/test-vectors.csv` in `bitcoin/bips` with its provenance, sha256 and measured
@@ -214,19 +244,28 @@ Schnorr adaptor vectors** — neither BIP-327 nor secp256k1-zkp publishes any �
 lab's adaptor fixtures in `src/crypto/fixtures.ts` are self-derived, are never labelled
 official, and are guarded by the independent re-derivation above.
 
-**Browser gates — 77 tests.**
+**Browser gates — 115 tests.**
 
 - `e2e/a11y.spec.ts` — the axe-core WCAG 2.1 A/AA gate, run against the **production
   build** at desktop and 380px. Zero violations and zero `incomplete` findings; contrast is
   additionally computed arithmetically, and the non-text (1.4.11) baseline is **empty**,
   measured for this lab rather than inherited.
-- `e2e/claims.spec.ts` — 31 claims that the page tells the truth: cross-checks between
+- `e2e/claims.spec.ts` — 40 claims that the page tells the truth: cross-checks between
   surfaces, parts-sum-to-whole over the vector classes and fixture rows, and independent
   re-derivations evaluated in the browser with arithmetic sharing no code with the bundle.
   Includes the negative-claim fixture (every check green, funds gone, the limitation on
-  screen).
+  screen), the PTLC causality claims, the URL-state round trip, and the measured assertion
+  that the first meaningful action falls inside a 390x844 viewport.
 - `e2e/flows.spec.ts` — functional walkthroughs of every exhibit in Chromium, Firefox,
   WebKit and a mobile viewport.
+- `e2e/visual.spec.ts` — 13 focused snapshots, baselined for **both** macOS and Linux so
+  the gate runs locally and in CI rather than only where it was authored. Deliberately
+  narrow: the opening states, the mechanism in each of its three readings, the three swap
+  outcomes, the two nonce modes, and PTLC settlement at its first, final and broken
+  transitions. The giant vector tables are not snapshotted — the claims suite already
+  checks them value by value. Tolerance is tight for a measured reason: at the usual 1%
+  a semantic colour swap moved fewer pixels than the allowance and every snapshot still
+  passed, so it was tightened until that mutation fails.
 
 Every rendered verdict has a matching source mutation recorded in `e2e/claims.spec.ts`,
 and each was run: the mutation was applied, the build confirmed to still succeed, the
@@ -240,7 +279,8 @@ blocks a publish.
 
 Everything runs in the browser on a single 256-bit curve; the whole unit suite takes about
 two seconds, and the heaviest page operation is the fixture table, which performs five
-full pre-sign/adapt/extract round trips plus 19 vector verifications on render.
+full pre-sign/adapt/extract round trips plus 19 vector verifications on render. The opening
+exhibit does one pre-signature at mount and nothing else until you press a button.
 
 ---
 

@@ -281,40 +281,36 @@ export async function boot(page: Page, theme: 'dark' | 'light'): Promise<void> {
   await expect(page.locator('#app')).toHaveCount(1);
 
   // Dark is the only theme, so the page must carry no theme control at all.
-  // The shared CSS hides any lab toggle with `display:none !important`, which
-  // would leave a dead-but-known element; asserting the count at zero catches
-  // the day one is added without going through that list.
   await expect(
     page.locator('#theme-toggle, #themeToggle, .theme-toggle, .theme-toggle-btn, [data-theme-toggle]')
   ).toHaveCount(0);
   await expect(page.locator('#cl-theme-toggle')).toHaveCount(0);
 
   // ── The arrival state ───────────────────────────────────────────────────
-  // The Relation panel pre-signs at mount, so first paint already carries the
-  // step 1 and step 2 readouts and both step 2 verdicts. The other five panels
-  // are lazily rendered: hidden AND EMPTY until their tab is first activated —
-  // asserted, because "empty" is this lab's tell that a renderer threw.
-  await expect(page.locator('#panel-relation .card')).not.toHaveCount(0);
-  await expect(page.locator('#panel-relation .verdict-pass').first()).toContainText(
-    'REJECTED by BIP-340 verify'
-  );
+  // Nothing has been run. The mechanism is rendered in its OFF state (dashed
+  // edges, em-dash placeholders), stage 1 says so, and stages 2-4 do not exist.
+  // The other five panels are hidden AND EMPTY until their tab is first
+  // activated — asserted, because "empty" is this lab's tell that a renderer
+  // threw.
+  await expect(page.locator('#panel-relation .opening')).toHaveCount(1);
+  await expect(page.locator('#btn-run')).toBeVisible();
+  await expect(page.locator('#panel-relation .mech-sub.is-off')).toHaveCount(1);
+  await expect(page.locator('#panel-relation .mech-sub.is-equal')).toHaveCount(0);
+  await expect(page.locator('#panel-relation .verdict-neutral')).toContainText('Not run yet');
+  await expect(page.locator('#panel-relation .stage-card')).toHaveCount(1);
   for (const id of ['swap', 'ptlc', 'break', 'vectors', 'honesty']) {
     await expect(page.locator(`#panel-${id}`)).toBeHidden();
     await expect(page.locator(`#panel-${id}`)).toBeEmpty();
   }
 
   // ── Every shipped control default ───────────────────────────────────────
+  // The inputs live inside the "Change the inputs" disclosure, which ships SHUT.
+  // Their values are still asserted, so a default that drifts is caught even
+  // though a reader does not see them on arrival.
   await expect(page.locator('#sk-input')).toHaveValue(/^[0-9a-f]{64}$/);
   await expect(page.locator('#t-input')).toHaveValue(/^[0-9a-f]+$/);
   await expect(page.locator('#msg-input')).toHaveValue('Alice pays Bob 0.10 units on ledger A');
-  // Step 3 arrives EMPTY and step 4 does not exist: the brief's rule is that a
-  // completed signature is never drawn before t is supplied, and that rule is
-  // structural here rather than a matter of care.
   await expect(page.locator('#supply-t')).toHaveValue('');
-  await expect(page.locator('#panel-relation .verdict-neutral')).toContainText(
-    'Nothing completed yet'
-  );
-  await expect(page.locator('#panel-relation .diff-strip')).toHaveCount(0);
 
   // ── Disclosures ship shut ───────────────────────────────────────────────
   await expect(page.locator('#panel-relation details[open]')).toHaveCount(0);
@@ -732,7 +728,7 @@ async function openTab(page: Page, name: RegExp, panelId: string): Promise<void>
 export async function driveAllStates(page: Page, theme: string): Promise<void> {
   const scanAt = (s: string): Promise<void> => scan(page, `${theme} / ${s}`);
 
-  await scanAt('arrival: Relation pre-signed, five panels unrendered, disclosures shut');
+  await scanAt('arrival: nothing run, mechanism OFF, one stage, five panels unrendered');
 
   // ── The shared skip link, focused ───────────────────────────────────────
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.());
@@ -740,86 +736,120 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await expect(page.locator('a.cl-skip-link')).toBeFocused();
   await scanAt('the shared skip link focused, slid in from top:-3rem');
 
-  // ── The Relation: the headline, driven through both outcomes ────────────
-  // A WRONG t first. The difference strip paints `.not-equal` (a --bad edge and
-  // --bad-text values) and the library's verdict is a REJECTION rendered as a
-  // PASS verdict, which is the one tone pairing in this lab that a reader could
-  // mistake for a contradiction, so it gets scanned before the happy path.
-  await page.locator('#supply-t').fill('dead' + 'beef'.repeat(12));
-  await page.locator('#btn-complete').click();
-  await expect(page.locator('#panel-relation .diff-strip.not-equal')).toHaveCount(1);
-  await scanAt('Relation: a wrong t — difference strip mismatched, signature refused');
+  // ── The Relation: stepped, then both outcomes of the headline ───────────
+  await page.locator('#btn-step').click();
+  await expect(page.locator('#panel-relation .mech-t.is-on')).toHaveCount(1);
+  await scanAt('Relation: stage 1 only — t and T lit, the rest still OFF');
 
-  // The real t: the strip flips to `.is-equal` and takes t's violet, step 4
-  // appears for the first time, and both extraction pills paint.
-  await page.locator('#btn-use-real-t').click();
-  await expect(page.locator('#panel-relation .diff-strip.is-equal')).toHaveCount(1);
-  await expect(page.locator('#panel-relation .verdict-pass').last()).toContainText(
-    'Secret recovered'
-  );
-  await scanAt('Relation: the real t — equality holds, step 4 rendered with both pills');
+  await page.locator('#btn-step').click();
+  await expect(page.locator('#panel-relation .stage-card')).toHaveCount(2);
+  await scanAt('Relation: stage 2 — the pre-signature, two verdicts that disagree');
 
-  await page.locator('#panel-relation details > summary').first().click();
-  await expect(page.locator('#panel-relation details[open]')).toHaveCount(1);
-  await scanAt('Relation: the extraction disclosure open');
+  // A WRONG t. The subtraction paints `.not-equal` (a --bad edge and --bad-text
+  // values) and the library's verdict is a REJECTION rendered as a PASS verdict,
+  // which is the one tone pairing here a reader could mistake for a
+  // contradiction, so it is scanned before the happy path.
+  await page.locator('#btn-wrong-t').click();
+  await expect(page.locator('#panel-relation .mech-sub.not-equal')).toHaveCount(1);
+  await scanAt('Relation: a wrong t — subtraction mismatched, signature refused');
 
-  // A malformed key: the error path replaces the whole panel below step 1.
+  // The real t: the subtraction flips to `.is-equal` and takes t's violet.
+  await page.locator('#btn-run').click();
+  await expect(page.locator('#panel-relation .mech-sub.is-equal')).toHaveCount(1);
+  await expect(page.locator('#panel-relation .stage-card')).toHaveCount(4);
+  await scanAt('Relation: the real t — equality holds, all four stages rendered');
+
+  // Every Inspect disclosure, opened the way a reader opens it. These carry the
+  // full hex, the parity and the challenge, so nothing is scanned only in its
+  // collapsed state.
+  const inspects = page.locator('#panel-relation details.inspect > summary');
+  const n = await inspects.count();
+  for (let i = 0; i < n; i++) await inspects.nth(i).click();
+  await expect(page.locator('#panel-relation details.inspect[open]')).toHaveCount(n);
+  await scanAt('Relation: every Inspect disclosure open, full hex on screen');
+
+  // A malformed key, entered through the inputs disclosure.
   await page.locator('#sk-input').fill('not-hex');
   await page.locator('#btn-lock').click();
   await expect(page.locator('#panel-relation .verdict-fail')).toContainText('Rejected');
   await scanAt('Relation: a malformed signing key, the failure verdict');
 
+  await page.locator('#panel-relation details.inspect > summary').last().click();
   await page.locator('#sk-input').fill('0a11ce0000000000000000000000000000000000000000000000000000000001');
   await page.locator('#btn-lock').click();
   await expect(page.locator('#panel-relation .verdict-fail')).toHaveCount(0);
   await scanAt('Relation: recovered from the malformed key');
 
-  // ── Cross-ledger swap ───────────────────────────────────────────────────
-  await openTab(page, /Cross-Ledger Swap/, '#panel-swap');
-  await expect(page.locator('#panel-swap .step')).not.toHaveCount(0);
-  await scanAt('Swap: the honest run, every step DONE');
+  // ── Cross-ledger swap, stepped ──────────────────────────────────────────
+  await openTab(page, /^Swap$/, '#panel-swap');
+  await expect(page.locator('#panel-swap .step')).toHaveCount(1);
+  await scanAt('Swap: first event only, actor lanes before anyone knows t');
+
+  await page.locator('#btn-swap-next').click();
+  await scanAt('Swap: one transition advanced');
+
+  await page.locator('#btn-swap-all').click();
+  await expect(page.locator('#panel-swap .verdict').filter({ hasText: 'Both sides paid, in order' })).toHaveCount(1);
+  await scanAt('Swap: the honest run complete, every step DONE');
 
   // Cheat alone: caught, nobody pays. A `.step-status.is-blocked` and a
   // `.verdict-pass` reporting a REJECTION — the other tone pairing worth scanning.
   await page.locator('#swap-cheat').check();
+  await page.locator('#btn-swap-all').click();
   await expect(page.locator('#panel-swap .step-status.is-blocked')).not.toHaveCount(0);
   await scanAt('Swap: Alice cheats, Bob checks — fraud caught before anyone paid');
 
   // Both: the loss, with the negative-claim callout on screen.
   await page.locator('#swap-skip').check();
+  await page.locator('#btn-swap-all').click();
   await expect(page.locator('#panel-swap #swap-negative-claim')).toBeVisible();
   await expect(page.locator('#panel-swap .verdict-alarm')).toContainText('BOB LOST HIS COINS');
   await scanAt('Swap: the loss — alarm verdict and the danger callout');
 
-  await page.locator('#panel-swap details > summary').first().click();
-  await expect(page.locator('#panel-swap details[open]')).toHaveCount(1);
-  await scanAt('Swap: the modeled-ledger disclosure open');
+  await page.locator('#panel-swap details.inspect > summary').first().click();
+  await scanAt('Swap: the inspect disclosure open');
 
-  await page.locator('#swap-cheat').uncheck();
+  await page.locator('#btn-swap-reset').click();
   await expect(page.locator('#panel-swap .verdict-alarm')).toHaveCount(0);
-  await scanAt('Swap: skipping the check alone is harmless — both sides paid');
+  await scanAt('Swap: reset to the documented safe state');
 
-  // ── PTLC ────────────────────────────────────────────────────────────────
-  await openTab(page, /PTLC vs HTLC/, '#panel-ptlc');
+  // ── PTLC, stepped and then broken ───────────────────────────────────────
+  await openTab(page, /^PTLC$/, '#panel-ptlc');
   await expect(page.locator('#panel-ptlc .strip-ptlc .strip-row')).toHaveCount(3);
-  await expect(page.locator('#panel-ptlc .strip-htlc .strip-row')).toHaveCount(3);
-  await scanAt('PTLC: both strips and the settlement table');
+  await scanAt('PTLC: both strips, nothing settled yet');
 
-  await page.locator('#panel-ptlc details > summary').first().click();
-  await expect(page.locator('#panel-ptlc details[open]')).toHaveCount(1);
-  await scanAt('PTLC: the what-is-modeled disclosure open');
+  await page.locator('#btn-ptlc-next').click();
+  await expect(page.locator('#panel-ptlc .pill-ok').filter({ hasText: 'settled' })).toHaveCount(1);
+  await scanAt('PTLC: the LAST hop settled first, the rest still waiting');
+
+  await page.locator('#btn-ptlc-all').click();
+  await expect(page.locator('#panel-ptlc .verdict-pass').filter({ hasText: 'Every hop settled' })).toHaveCount(1);
+  await scanAt('PTLC: every hop settled, each from the one below it');
+
+  // The causal break: corrupting a middle hop stalls everything upstream.
+  await page.locator('#ptlc-corrupt-2').check();
+  await page.locator('#btn-ptlc-all').click();
+  await expect(page.locator('#panel-ptlc .verdict-alarm')).toContainText('chain is broken');
+  await expect(page.locator('#panel-ptlc .pill-fail').filter({ hasText: 'BLOCKED' })).toHaveCount(2);
+  await scanAt('PTLC: hop 2 corrupted — blocked rows and the broken-chain alarm');
+
+  await page.locator('#panel-ptlc details.inspect > summary').first().click();
+  await scanAt('PTLC: the transition log open');
 
   // The settlement table is a scrolling region; focus it so its focus ring and
   // its keyboard reachability are both scanned.
   await page.locator('#panel-ptlc .table-wrap').first().focus();
   await scanAt('PTLC: the settlement table region focused');
 
+  await page.locator('#btn-ptlc-reset').click();
+  await scanAt('PTLC: reset to the honest route');
+
   // ── Break It ────────────────────────────────────────────────────────────
-  await openTab(page, /Break It/, '#panel-break');
+  await openTab(page, /^Break It$/, '#panel-break');
   await expect(page.locator('#panel-break .pill-ok').first()).toContainText('different nonce');
   await scanAt('Break It: the safe default — no shared nonce, no recovery');
 
-  await page.locator('#naive-nonce').check();
+  await page.locator('#btn-break-go').click();
   await expect(page.locator('#panel-break .verdict-alarm').first()).toContainText(
     'PRIVATE KEY RECOVERED'
   );
@@ -832,49 +862,53 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   );
   await scanAt('Break It: same T — the nonce is reused and it still does not recover');
 
-  await page.locator('#same-t').uncheck();
-  await page.locator('#naive-nonce').uncheck();
+  await page.locator('#panel-break details.inspect > summary').first().click();
+  await scanAt('Break It: the wrong-T inspect disclosure open');
+
+  await page.locator('#btn-break-reset').click();
   await scanAt('Break It: back to the safe default');
 
   // ── Vectors & Fixtures ──────────────────────────────────────────────────
-  await openTab(page, /Vectors & Fixtures/, '#panel-vectors');
+  await openTab(page, /^Vectors$/, '#panel-vectors');
   await expect(page.locator('#panel-vectors tbody tr')).not.toHaveCount(0);
   // The deliberately wrong row paints a --bad row tint and a .pill-fail; both
   // are only reachable here, and both must be measured.
   await expect(page.locator('#panel-vectors tr.row-wrong .pill-fail')).toHaveCount(1);
   await scanAt('Vectors: both tables, including the deliberately wrong fixture row');
 
-  await page.locator('#panel-vectors details > summary').first().click();
-  await scanAt('Vectors: the hash-block disclosure open');
-
-  await page.locator('#panel-vectors details > summary').last().click();
-  await scanAt('Vectors: the no-official-vectors disclosure open');
+  const vIns = page.locator('#panel-vectors details > summary');
+  const vn = await vIns.count();
+  for (let i = 0; i < vn; i++) await vIns.nth(i).click();
+  await scanAt('Vectors: every disclosure open');
 
   await page.locator('#panel-vectors .table-wrap').first().focus();
   await scanAt('Vectors: the vector table region focused');
 
   // ── Honesty ─────────────────────────────────────────────────────────────
-  await openTab(page, /What This Is & Isn't/, '#panel-honesty');
+  await openTab(page, /^Honesty$/, '#panel-honesty');
   await expect(page.locator('#panel-honesty .honesty-tag')).not.toHaveCount(0);
   await scanAt('Honesty: real / modeled / not built, threat model and sources');
 
   // ── Hover, which persists after a click ─────────────────────────────────
-  await page.getByRole('tab', { name: 'The Relation' }).hover();
+  await page.getByRole('tab', { name: /^Relation$/ }).hover();
   await scanAt('an inactive tab hovered — its surface repainted');
 
-  await openTab(page, /The Relation/, '#panel-relation');
-  await page.locator('#btn-lock').hover();
-  await scanAt('a primary button hovered');
+  await openTab(page, /^Relation$/, '#panel-relation');
+  await page.locator('#btn-run').hover();
+  await scanAt('the primary button hovered');
 
   await page.locator('.cl-topbar .cl-btn').first().hover();
   await scanAt('a shared top bar control hovered');
 
   // ── Focus rings on the controls that take them ──────────────────────────
-  await page.locator('#msg-input').focus();
-  await expect(page.locator('#msg-input')).toBeFocused();
-  await scanAt('a text input focused, showing its focus-visible outline');
+  await page.locator('#btn-run').focus();
+  await expect(page.locator('#btn-run')).toBeFocused();
+  await scanAt('the primary button focused, showing its focus-visible outline');
 
-  await page.getByRole('tab', { name: 'The Relation' }).focus();
+  await page.locator('#btn-reset-all').focus();
+  await scanAt('the reset-all control focused');
+
+  await page.getByRole('tab', { name: /^Relation$/ }).focus();
   await scanAt('the active tab focused');
 
   await page.locator('#panel-relation').focus();

@@ -111,3 +111,71 @@ export function short(hexStr: string, keep = 10): string {
 export function hexOf(v: bigint): string {
   return v.toString(16).padStart(64, '0')
 }
+
+/**
+ * Progressive disclosure: the third layer.
+ *
+ * Every exhibit is built in three layers -- STORY (actors, action, consequence),
+ * PROOF (the computed equation and the verifier's verdict), and INSPECT (full hex,
+ * parity, challenge, fixtures, sources). Nothing is removed from the page by this;
+ * what changes is WHEN it appears. Ships shut, and the a11y gate drives it open
+ * through its own summary rather than revealing it from script.
+ */
+export function inspect(summary: string, ...children: (Node | string)[]): HTMLElement {
+  const d = el('details', { class: 'inspect' })
+  d.append(el('summary', {}, el('span', { class: 'inspect-label', text: summary })))
+  const body = el('div', { class: 'inspect-body' })
+  for (const c of children) body.append(c)
+  d.append(body)
+  return d
+}
+
+/**
+ * The trust rail: a quiet, persistent statement of what is real and what is modeled,
+ * shown beside the mechanism rather than only in the honesty panel. It exists so the
+ * implementation boundary is established once, visibly, instead of being re-explained
+ * every time a verdict appears.
+ */
+export function trustRail(...items: { kind: 'real' | 'modeled' | 'input'; text: string }[]): HTMLElement {
+  const ul = el('ul', { class: 'trust-rail reset-list', 'aria-label': 'What is real on this page' })
+  for (const it of items) {
+    ul.append(
+      el(
+        'li',
+        { class: `trust-item trust-${it.kind}` },
+        el('span', { class: 'trust-tag', text: it.kind === 'modeled' ? 'MODELED' : it.kind === 'real' ? 'REAL' : 'INPUT' }),
+        el('span', { class: 'trust-text', text: it.text }),
+      ),
+    )
+  }
+  return ul
+}
+
+/** A short story paragraph: the first layer, plain language, no hex. */
+export function story(...paras: string[]): HTMLElement {
+  const box = el('div', { class: 'story' })
+  for (const p of paras) box.append(el('p', { text: p }))
+  return box
+}
+
+/** A row of actions, with the primary one first. */
+export function actions(...btns: HTMLElement[]): HTMLElement {
+  return el('div', { class: 'actionbar' }, ...btns)
+}
+
+export function button(
+  label: string,
+  opts: { id?: string; primary?: boolean; disabled?: boolean; describedBy?: string },
+  onClick: () => void,
+): HTMLButtonElement {
+  const attrs: Record<string, string> = {
+    type: 'button',
+    class: `btn ${opts.primary ? 'btn-primary' : 'btn-secondary'}`,
+  }
+  if (opts.id) attrs.id = opts.id
+  if (opts.describedBy) attrs['aria-describedby'] = opts.describedBy
+  const b = el('button', attrs, document.createTextNode(label)) as HTMLButtonElement
+  if (opts.disabled) b.disabled = true
+  b.addEventListener('click', onClick)
+  return b
+}

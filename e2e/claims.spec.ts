@@ -32,6 +32,23 @@ async function boot(page: Page): Promise<void> {
   await expect(page.locator('#panel-relation .card').first()).toBeVisible()
 }
 
+/**
+ * Open every progressive-disclosure block in a panel.
+ *
+ * Exact values live behind "Inspect exact values" now, and a closed <details>
+ * reports empty innerText -- so a claim that reads a rendered value has to open the
+ * disclosure the way a reader would, through its summary, rather than by stripping
+ * the attribute from script.
+ */
+async function openAllInspects(page: Page, panel: string): Promise<void> {
+  const sums = page.locator(`${panel} details.inspect > summary`)
+  const n = await sums.count()
+  for (let i = 0; i < n; i++) {
+    const d = sums.nth(i)
+    if (!(await d.evaluate((e) => (e.parentElement as HTMLDetailsElement).open))) await d.click()
+  }
+}
+
 /** The abbreviated text of a labelled field row, as a reader sees it. */
 async function fieldValue(page: Page, panel: string, label: string): Promise<string> {
   return page
@@ -104,39 +121,40 @@ test.describe('The Relation — the headline claim', () => {
     page,
   }) => {
     await boot(page)
-    await page.locator('#btn-use-real-t').click()
-    await expect(page.locator('#panel-relation .diff-strip')).toHaveCount(1)
+    await page.locator('#btn-run').click()
+    await expect(page.locator('#panel-relation .mech-sub.is-equal')).toHaveCount(1)
+    await openAllInspects(page, '#panel-relation')
 
     // Everything below is parsed OFF THE PAGE -- exact values, via data-full,
     // each one checked against the abbreviation the reader actually sees.
     const sHat = await fieldFull(page, '#panel-relation', 'HELD EARLIER')
     const sPub = await fieldFull(page, '#panel-relation', 'PUBLISHED: S')
-    const trueT = await fieldFull(page, '#panel-relation', 'T (NORMALISED)')
+    const trueT = await fieldFull(page, '#panel-relation', 'T (THE SECRET)')
     const parity = (await fieldValue(page, '#panel-relation', 'PARITY OF R + T')).trim()
 
-    const cells = page.locator('#panel-relation .diff-strip .diff-cell-value')
-    const diffShown = (await cells.nth(0).getAttribute('data-full')) ?? ''
-    const trueTShown = (await cells.nth(1).getAttribute('data-full')) ?? ''
+    const shown = await page.locator('#panel-relation .mech-sub-val').getAttribute('data-full')
 
-    // CROSS-CHECK: the strip claims equality, so the two values it prints must
-    // actually be equal, and the right-hand one must be the t from step 1.
-    await expect(page.locator('#panel-relation .diff-strip.is-equal')).toHaveCount(1)
-    expect(diffShown).toBe(trueTShown)
-    expect(trueTShown).toBe(trueT)
+    // CROSS-CHECK: the strip claims equality, so the value it prints must be the
+    // t from stage 1.
+    expect(shown).toBe(trueT)
 
     // INDEPENDENT RE-DERIVATION: subtract the s-hat and s the PAGE printed, by
     // the parity rule the PAGE printed, using arithmetic that shares no code
     // with the bundle -- and confirm it lands on the t the page displayed.
     const N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n
     const m = (a: bigint): bigint => ((a % N) + N) % N
-    const sHatN = BigInt('0x' + sHat)
-    const sN = BigInt('0x' + sPub)
-    const recomputed = parity === 'even' ? m(sN - sHatN) : m(sHatN - sN)
+    const recomputed =
+      parity === 'even'
+        ? m(BigInt('0x' + sPub) - BigInt('0x' + sHat))
+        : m(BigInt('0x' + sHat) - BigInt('0x' + sPub))
     expect(recomputed.toString(16).padStart(64, '0')).toBe(trueT)
 
     // ...and the OTHER branch must NOT land on it, so the parity rule is doing
     // work rather than being decorative.
-    const wrongWay = parity === 'even' ? m(sHatN - sN) : m(sN - sHatN)
+    const wrongWay =
+      parity === 'even'
+        ? m(BigInt('0x' + sHat) - BigInt('0x' + sPub))
+        : m(BigInt('0x' + sPub) - BigInt('0x' + sHat))
     expect(wrongWay.toString(16).padStart(64, '0')).not.toBe(trueT)
 
     // MUTATION TARGET (§4.1c): flip the parity rule in adaptor.ts `adapt`
@@ -145,11 +163,11 @@ test.describe('The Relation — the headline claim', () => {
 
   test('the completed signature verifies, and the page says so by computation', async ({ page }) => {
     await boot(page)
-    await page.locator('#btn-use-real-t').click()
+    await page.locator('#btn-run').click()
     const verdicts = page.locator('#panel-relation .verdict')
     await expect(verdicts.filter({ hasText: 'VALID BIP-340 signature' })).toHaveCount(1)
     // and the pre-signature verdict on the same page says the opposite
-    await expect(verdicts.filter({ hasText: 'REJECTED by BIP-340 verify' })).toHaveCount(1)
+    await expect(verdicts.filter({ hasText: 'BIP-340 verify REJECTS it' })).toHaveCount(1)
     // MUTATION TARGET: drop T from the nonce derivation in adaptor.ts
     // `deriveNonce` (remove Tx from the hashed input). Pre-verification still
     // passes, but invariant 6's claim in Break It collapses -- see below.
@@ -158,15 +176,14 @@ test.describe('The Relation — the headline claim', () => {
   test('a wrong t turns the headline claim red and the signature is refused', async ({ page }) => {
     // The falsification. If this cannot be reached, the green badge is not evidence.
     await boot(page)
-    await page.locator('#supply-t').fill('dead' + 'beef'.repeat(12))
-    await page.locator('#btn-complete').click()
-    await expect(page.locator('#panel-relation .diff-strip.not-equal')).toHaveCount(1)
-    await expect(page.locator('#panel-relation .diff-strip.is-equal')).toHaveCount(0)
+    await page.locator('#btn-wrong-t').click()
+    await expect(page.locator('#panel-relation .mech-sub.not-equal')).toHaveCount(1)
+    await expect(page.locator('#panel-relation .mech-sub.is-equal')).toHaveCount(0)
     await expect(
-      page.locator('#panel-relation .verdict').filter({ hasText: 'is NOT the secret behind T' }),
+      page.locator('#panel-relation .verdict').filter({ hasText: 'REJECTED — the correct answer for a wrong t' }),
     ).toHaveCount(1)
     await expect(
-      page.locator('#panel-relation .verdict').filter({ hasText: 'REJECTED — which is the correct answer' }),
+      page.locator('#panel-relation .verdict').filter({ hasText: 'REJECTED — the correct answer for a wrong t' }),
     ).toHaveCount(1)
     // and it must NOT claim a valid signature anywhere
     await expect(
@@ -176,38 +193,43 @@ test.describe('The Relation — the headline claim', () => {
 
   test('RETIREMENT: changing an input clears the completed signature entirely', async ({ page }) => {
     await boot(page)
-    await page.locator('#btn-use-real-t').click()
-    await expect(page.locator('#panel-relation .diff-strip')).toHaveCount(1)
+    await page.locator('#btn-run').click()
+    await expect(page.locator('#panel-relation .mech-sub.is-equal')).toHaveCount(1)
     // Re-lock with a new message. The stale completion must be GONE, not stale.
+    await openAllInspects(page, '#panel-relation')
     await page.locator('#msg-input').fill('Alice pays Bob 0.11 units on ledger A')
     await page.locator('#btn-lock').click()
-    await expect(page.locator('#panel-relation .diff-strip')).toHaveCount(0)
-    await expect(page.locator('#panel-relation .verdict-neutral')).toContainText(
-      'Nothing completed yet',
-    )
-    // and step 4 is gone with it: the brief's rule is that a completed signature
-    // is never drawn before t is supplied
-    await expect(
-      page.locator('#panel-relation').filter({ hasText: 'read the secret back out' }),
-    ).toHaveCount(0)
+    await expect(page.locator('#panel-relation .mech-sub.is-equal')).toHaveCount(0)
+    await expect(page.locator('#panel-relation .mech-sub.is-off')).toHaveCount(1)
+    // and stages 3 and 4 are gone with it: the brief's rule is that a completed
+    // signature is never drawn before t is supplied, and it is structural here
+    await expect(page.locator('#panel-relation .stage-card')).toHaveCount(2)
+    await expect(page.locator('#panel-relation')).not.toContainText('Subtract, and the secret falls out')
   })
 
   test('NO-OP GUARD: re-locking with the same inputs does not destroy a fresh verdict', async ({
     page,
   }) => {
     await boot(page)
-    const before = await fieldValue(page, '#panel-relation', 'T = T·G, X-ONLY')
+    await page.locator('#btn-run').click()
+    const before = await fieldFull(page, '#panel-relation', 'T = T·G (PUBLIC)')
+    await expect(page.locator('#panel-relation .mech-sub.is-equal')).toHaveCount(1)
+    // Re-lock with the inputs UNCHANGED. The fresh verdict must survive.
+    await openAllInspects(page, '#panel-relation')
     await page.locator('#btn-lock').click()
-    const after = await fieldValue(page, '#panel-relation', 'T = T·G, X-ONLY')
+    const after = await fieldFull(page, '#panel-relation', 'T = T·G (PUBLIC)')
     expect(after).toBe(before)
     await expect(page.locator('#panel-relation .verdict-fail')).toHaveCount(0)
+    // Stage 1 and 2 still stand; re-locking retires only the completion, which is
+    // correct -- a new pre-signature has been made, so the old s no longer pairs.
+    await expect(page.locator('#panel-relation .stage-card')).toHaveCount(2)
   })
 })
 
 test.describe('Vectors and fixtures — counts must agree with the rows', () => {
   test('the summary counter agrees with the rows it counts', async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /Vectors & Fixtures/ }).click()
+    await page.getByRole('tab', { name: /^Vectors$/ }).click()
     const rows = page.locator('#panel-vectors table').first().locator('tbody tr')
     const rowCount = await rows.count()
     const summary = await fieldValue(page, '#panel-vectors', 'ROWS MATCHING THE PUBLISHED RESULT')
@@ -251,7 +273,7 @@ test.describe('Vectors and fixtures — counts must agree with the rows', () => 
 
   test('PARTS SUM TO WHOLE: the three vector classes account for every row', async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /Vectors & Fixtures/ }).click()
+    await page.getByRole('tab', { name: /^Vectors$/ }).click()
     const rows = page.locator('#panel-vectors table').first().locator('tbody tr')
     const total = await rows.count()
     const signable = await rows.filter({ hasText: /^\s*\d+\s+signable/ }).count()
@@ -277,7 +299,7 @@ test.describe('Vectors and fixtures — counts must agree with the rows', () => 
     page,
   }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /Vectors & Fixtures/ }).click()
+    await page.getByRole('tab', { name: /^Vectors$/ }).click()
     const rows = page.locator('#panel-vectors table').first().locator('tbody tr')
     const data = await rows.evaluateAll((trs) =>
       trs.map((tr) => ({
@@ -300,7 +322,7 @@ test.describe('Vectors and fixtures — counts must agree with the rows', () => 
   test('the deliberately wrong fixture row is rendered and reported as FAILING', async ({ page }) => {
     // This is what makes every other green row on the page mean something.
     await boot(page)
-    await page.getByRole('tab', { name: /Vectors & Fixtures/ }).click()
+    await page.getByRole('tab', { name: /^Vectors$/ }).click()
     const wrong = page.locator('#panel-vectors tr.row-wrong')
     await expect(wrong).toHaveCount(1)
     await expect(wrong.locator('.pill-fail')).toHaveCount(1)
@@ -321,7 +343,7 @@ test.describe('Vectors and fixtures — counts must agree with the rows', () => 
 
   test('BOTH values are printed on every row, not only where they differ', async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /Vectors & Fixtures/ }).click()
+    await page.getByRole('tab', { name: /^Vectors$/ }).click()
     const fixtures = page.locator('#panel-vectors table').last().locator('tbody tr')
     const n = await fixtures.count()
     expect(n).toBeGreaterThan(1)
@@ -341,7 +363,7 @@ test.describe('Vectors and fixtures — counts must agree with the rows', () => 
     page,
   }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /Vectors & Fixtures/ }).click()
+    await page.getByRole('tab', { name: /^Vectors$/ }).click()
     const rows = page.locator('#panel-vectors table').last().locator('tbody tr')
     const total = await rows.count()
     const passing = Number(
@@ -357,7 +379,11 @@ test.describe('Vectors and fixtures — counts must agree with the rows', () => 
 test.describe('Swap — atomicity and the wrong-T loss', () => {
   test('the honest run pays both sides and the order is visible', async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /Cross-Ledger Swap/ }).click()
+    await page.getByRole('tab', { name: /^Swap$/ }).click()
+    // The exhibit reveals one transition at a time now, so the outcome exists only
+    // once the sequence has actually played out -- which is the point of stepping it.
+    await expect(page.locator('#panel-swap .step')).toHaveCount(1)
+    await page.locator('#btn-swap-all').click()
     await expect(page.locator('#panel-swap .verdict').filter({ hasText: 'Both sides paid, in order' })).toHaveCount(1)
     await expect(page.locator('#panel-swap .step-status.is-alarm')).toHaveCount(0)
     // the ledger B step precedes the ledger A step in the rendered order
@@ -370,7 +396,8 @@ test.describe('Swap — atomicity and the wrong-T loss', () => {
 
   test("Bob's claim is not computable before Alice publishes", async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /Cross-Ledger Swap/ }).click()
+    await page.getByRole('tab', { name: /^Swap$/ }).click()
+    await page.locator('#btn-swap-all').click()
     await expect(
       page.locator('#panel-swap .verdict').filter({ hasText: 'Not computable before Alice publishes' }),
     ).toHaveCount(1)
@@ -381,11 +408,12 @@ test.describe('Swap — atomicity and the wrong-T loss', () => {
   test('NEGATIVE CLAIM: every check passes and Bob still loses the funds', async ({ page }) => {
     // Template §4.1d, all three assertions.
     await boot(page)
-    await page.getByRole('tab', { name: /Cross-Ledger Swap/ }).click()
+    await page.getByRole('tab', { name: /^Swap$/ }).click()
 
-    // 1. REACH THE FIXTURE through the UI.
+    // 1. REACH THE FIXTURE through the UI, and drive the sequence to its end.
     await page.locator('#swap-cheat').check()
     await page.locator('#swap-skip').check()
+    await page.locator('#btn-swap-all').click()
 
     // 2. EVERY CHECK THE PAGE PERFORMS IN THIS STATE REPORTS SUCCESS, asserted
     //    against the rendered verdicts rather than a flag the test sets.
@@ -422,8 +450,9 @@ test.describe('Swap — atomicity and the wrong-T loss', () => {
     // The brief's discipline point: "X does not prove Y" is almost always too
     // broad. The skip is only a loss against a counterparty who cheats.
     await boot(page)
-    await page.getByRole('tab', { name: /Cross-Ledger Swap/ }).click()
+    await page.getByRole('tab', { name: /^Swap$/ }).click()
     await page.locator('#swap-skip').check()
+    await page.locator('#btn-swap-all').click()
     await expect(page.locator('#panel-swap .verdict-alarm')).toHaveCount(0)
     await expect(
       page.locator('#panel-swap .pill-ok').filter({ hasText: 'Bob was paid on ledger A' }),
@@ -432,8 +461,9 @@ test.describe('Swap — atomicity and the wrong-T loss', () => {
 
   test('SCOPED: cheating alone is caught and nobody pays', async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /Cross-Ledger Swap/ }).click()
+    await page.getByRole('tab', { name: /^Swap$/ }).click()
     await page.locator('#swap-cheat').check()
+    await page.locator('#btn-swap-all').click()
     await expect(
       page.locator('#panel-swap .verdict').filter({ hasText: 'Fraud caught before anyone paid' }),
     ).toHaveCount(1)
@@ -444,7 +474,7 @@ test.describe('Swap — atomicity and the wrong-T loss', () => {
 test.describe('PTLC — decorrelation is measured, not drawn', () => {
   test('the counters agree with the rendered strips', async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /PTLC vs HTLC/ }).click()
+    await page.getByRole('tab', { name: /^PTLC$/ }).click()
     const ptlcVals = await page.locator('#panel-ptlc .strip-ptlc .strip-val').allInnerTexts()
     const htlcVals = await page.locator('#panel-ptlc .strip-htlc .strip-val').allInnerTexts()
     expect(ptlcVals.length).toBe(3)
@@ -470,7 +500,7 @@ test.describe('PTLC — decorrelation is measured, not drawn', () => {
 
   test('settlement runs backward and every hop extraction matches', async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /PTLC vs HTLC/ }).click()
+    await page.getByRole('tab', { name: /^PTLC$/ }).click()
     const order = await page
       .locator('#panel-ptlc table tbody tr td:nth-child(2)')
       .allInnerTexts()
@@ -486,7 +516,7 @@ test.describe('PTLC — decorrelation is measured, not drawn', () => {
 test.describe('Break It — the attack is real and the default is safe', () => {
   test('the shipped default does NOT reuse a nonce', async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /Break It/ }).click()
+    await page.getByRole('tab', { name: /^Break It$/ }).click()
     await expect(page.locator('#naive-nonce')).not.toBeChecked()
     const r1 = (await fieldValue(page, '#panel-break', 'R FROM PRE-SIGNATURE 1')).trim()
     const r2 = (await fieldValue(page, '#panel-break', 'R FROM PRE-SIGNATURE 2')).trim()
@@ -503,7 +533,7 @@ test.describe('Break It — the attack is real and the default is safe', () => {
 
   test('the naive nonce really does share R, and the key is recovered', async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /Break It/ }).click()
+    await page.getByRole('tab', { name: /^Break It$/ }).click()
     await page.locator('#naive-nonce').check()
     const r1 = (await fieldValue(page, '#panel-break', 'R FROM PRE-SIGNATURE 1')).trim()
     const r2 = (await fieldValue(page, '#panel-break', 'R FROM PRE-SIGNATURE 2')).trim()
@@ -522,7 +552,7 @@ test.describe('Break It — the attack is real and the default is safe', () => {
     // Precision the brief asks for: nonce reuse is not sufficient on its own here.
     // The two challenges must differ, which means the two T must differ.
     await boot(page)
-    await page.getByRole('tab', { name: /Break It/ }).click()
+    await page.getByRole('tab', { name: /^Break It$/ }).click()
     await page.locator('#naive-nonce').check()
     await page.locator('#same-t').check()
     const r1 = (await fieldValue(page, '#panel-break', 'R FROM PRE-SIGNATURE 1')).trim()
@@ -540,7 +570,8 @@ test.describe('Break It — the attack is real and the default is safe', () => {
     page,
   }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /Break It/ }).click()
+    await page.getByRole('tab', { name: /^Break It$/ }).click()
+    await openAllInspects(page, '#panel-break')
     const real = (await fieldValue(page, '#panel-break', 'T YOU CARE ABOUT')).trim()
     const fake = (await fieldValue(page, '#panel-break', 'T IT ACTUALLY COMMITS TO')).trim()
     expect(real).not.toBe(fake)
@@ -556,7 +587,7 @@ test.describe('Break It — the attack is real and the default is safe', () => {
 test.describe('Honesty — the scoping the page claims is present and specific', () => {
   test('real / modeled / not built are all populated', async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /What This Is & Isn't/ }).click()
+    await page.getByRole('tab', { name: /^Honesty$/ }).click()
     for (const tag of ['REAL', 'MODELED', 'NOT BUILT']) {
       await expect(
         page.locator('#panel-honesty .honesty-tag').filter({ hasText: new RegExp(`^${tag}$`) }),
@@ -569,7 +600,7 @@ test.describe('Honesty — the scoping the page claims is present and specific',
 
   test('the negative claims are scoped to this construction, not to the field', async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /What This Is & Isn't/ }).click()
+    await page.getByRole('tab', { name: /^Honesty$/ }).click()
     await expect(page.locator('#negative-claim-presig')).toContainText('pin WHICH t would complete it')
     await expect(page.locator('#negative-claim-preverify')).toContainText(
       'no check on this page raises a failure code',
@@ -581,7 +612,7 @@ test.describe('Honesty — the scoping the page claims is present and specific',
 
   test('the fixtures are never called official', async ({ page }) => {
     await boot(page)
-    await page.getByRole('tab', { name: /Vectors & Fixtures/ }).click()
+    await page.getByRole('tab', { name: /^Vectors$/ }).click()
     await expect(page.locator('#fixture-caption')).toContainText('NOT official test vectors')
     // The failure this guards against is a fixture being PRESENTED as official.
     // Saying that no official adaptor vectors exist is the opposite of that, so
@@ -656,8 +687,10 @@ test.describe('Page-level honesty checks', () => {
     // recompute T = t*G with arithmetic that shares no code with the bundle, and
     // compare against the x(T) the PAGE printed.
     await boot(page)
-    const tFull = await fieldFull(page, '#panel-relation', 'T (NORMALISED)')
-    const TxFull = await fieldFull(page, '#panel-relation', 'T = T\u00b7G, X-ONLY')
+    await page.locator('#btn-run').click()
+    await openAllInspects(page, '#panel-relation')
+    const tFull = await fieldFull(page, '#panel-relation', 'T (THE SECRET)')
+    const TxFull = await fieldFull(page, '#panel-relation', 'T = T\u00b7G (PUBLIC)')
     const computed = await page.evaluate(
       ([code, t]) => {
         const lib = eval(code) as {
@@ -682,6 +715,10 @@ test.describe('Page-level honesty checks', () => {
     // with its own point arithmetic. This is the pre-verification claim checked
     // by a route the source does not take.
     await boot(page)
+    await page.locator('#btn-run').click()
+    // These values live behind "Inspect exact values", so open the disclosures the
+    // way a reader would rather than stripping the attribute from script.
+    await openAllInspects(page, '#panel-relation')
     // The label renders through `text-transform: uppercase`, so match on the
     // part that is unambiguous rather than on the cased s-circumflex.
     const sHat = await fieldFull(page, '#panel-relation', 'PRE-SIGNATURE)')
@@ -709,5 +746,127 @@ test.describe('Page-level honesty checks', () => {
     )
     expect(holds.correct).toBe(true)
     expect(holds.wrong).toBe(false)
+  })
+})
+
+test.describe('PTLC — causality is on screen, not just in prose', () => {
+  test('settlement starts at the LAST hop and cannot advance until it succeeds', async ({ page }) => {
+    await boot(page)
+    await page.getByRole('tab', { name: /^PTLC$/ }).click()
+    // Nothing settled on arrival.
+    await expect(page.locator('#panel-ptlc .pill').filter({ hasText: 'settled' })).toHaveCount(0)
+    await page.locator('#btn-ptlc-next').click()
+    // Exactly one hop has settled, and it is the last one on the route.
+    const settled = page.locator('#panel-ptlc tbody tr', { has: page.locator('.pill-ok', { hasText: 'settled' }) })
+    await expect(settled).toHaveCount(1)
+    await expect(settled.first()).toContainText('hop 3')
+  })
+
+  test('corrupting a hop BLOCKS every hop upstream and none downstream', async ({ page }) => {
+    // The P0 claim: the model is causal, so a break really does stall the hops
+    // that depend on it. Asserted against the rendered rows.
+    await boot(page)
+    await page.getByRole('tab', { name: /^PTLC$/ }).click()
+    await page.locator('#ptlc-corrupt-2').check()
+    await page.locator('#btn-ptlc-all').click()
+
+    const rowText = async (hop: string) =>
+      (await page.locator('#panel-ptlc tbody tr', { hasText: hop }).first().innerText()).trim()
+
+    // hop 3 is DOWNSTREAM of the break: unaffected.
+    expect(await rowText('hop 3')).toMatch(/settled/)
+    // hop 2 is the break, hop 1 is upstream of it: both stop.
+    expect(await rowText('hop 2')).toMatch(/BLOCKED/)
+    expect(await rowText('hop 1')).toMatch(/BLOCKED/)
+    await expect(page.locator('#panel-ptlc .verdict-alarm')).toContainText('chain is broken')
+    // and the page names the cause for the upstream hop specifically
+    await expect(page.locator('#panel-ptlc')).toContainText('no usable secret arrived from downstream')
+  })
+
+  test('corrupting the FIRST hop stalls nothing else — the break is directional', async ({ page }) => {
+    await boot(page)
+    await page.getByRole('tab', { name: /^PTLC$/ }).click()
+    await page.locator('#ptlc-corrupt-1').check()
+    await page.locator('#btn-ptlc-all').click()
+    const blocked = page.locator('#panel-ptlc tbody tr .pill-fail', { hasText: 'BLOCKED' })
+    await expect(blocked).toHaveCount(1)
+  })
+})
+
+test.describe('Time to the insight', () => {
+  test('one action reaches s - s-hat = t', async ({ page }) => {
+    await boot(page)
+    await expect(page.locator('#panel-relation .mech-sub.is-equal')).toHaveCount(0)
+    await page.locator('#btn-run').click()
+    await expect(page.locator('#panel-relation .mech-sub.is-equal')).toHaveCount(1)
+    await expect(
+      page.locator('#panel-relation .verdict').filter({ hasText: 'Secret recovered' }),
+    ).toHaveCount(1)
+  })
+
+  test('the primary action is inside the first 390x844 viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await boot(page)
+    const y = await page.locator('#btn-run').evaluate((e) => {
+      const r = e.getBoundingClientRect()
+      return r.top + window.scrollY
+    })
+    expect(y, 'the first meaningful action must be visible without scrolling').toBeLessThan(844)
+    // and the page has not been scrolled for the reader
+    expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  })
+
+  test('raw hex is optional detail, not the opening experience', async ({ page }) => {
+    await boot(page)
+    // No 64-character hex run is visible before anything is run or disclosed.
+    const visibleText = await page.locator('#panel-relation').innerText()
+    expect(visibleText).not.toMatch(/[0-9a-f]{64}/)
+    // and the inputs ship behind a closed disclosure
+    await expect(page.locator('#panel-relation details.inspect[open]')).toHaveCount(0)
+    await expect(page.locator('#sk-input')).not.toBeVisible()
+  })
+})
+
+test.describe('URL state survives refresh and Back', () => {
+  test('the active exhibit and its failure mode are linkable', async ({ page }) => {
+    await boot(page)
+    await page.getByRole('tab', { name: /^Swap$/ }).click()
+    await page.locator('#swap-cheat').check()
+    await page.locator('#swap-skip').check()
+    const hash = await page.evaluate(() => location.hash)
+    expect(hash).toContain('e=swap')
+    expect(hash).toContain('cheat=1')
+    expect(hash).toContain('skip=1')
+
+    // A reload restores the same state...
+    await page.reload()
+    await expect(page.locator('#panel-swap')).toBeVisible()
+    await expect(page.locator('#swap-cheat')).toBeChecked()
+    await expect(page.locator('#swap-skip')).toBeChecked()
+
+    // ...and two people opening that link see the same proof.
+    await page.locator('#btn-swap-all').click()
+    await expect(page.locator('#swap-negative-claim')).toBeVisible()
+  })
+
+  test('Back returns to the previous exhibit', async ({ page }) => {
+    await boot(page)
+    await page.getByRole('tab', { name: /^PTLC$/ }).click()
+    await expect(page.locator('#panel-ptlc')).toBeVisible()
+    await page.goBack()
+    await expect(page.locator('#panel-relation')).toBeVisible()
+  })
+
+  test('Reset all returns the page to its documented safe state', async ({ page }) => {
+    await boot(page)
+    await page.getByRole('tab', { name: /^Break It$/ }).click()
+    await page.locator('#btn-break-go').click()
+    await expect(page.locator('#panel-break .verdict-alarm').first()).toBeVisible()
+    await page.locator('#btn-reset-all').click()
+    await expect(page.locator('#panel-relation')).toBeVisible()
+    expect(await page.evaluate(() => location.hash)).toBe('#e=relation')
+    // the deliberately broken mode is off again
+    await page.getByRole('tab', { name: /^Break It$/ }).click()
+    await expect(page.locator('#naive-nonce')).not.toBeChecked()
   })
 })

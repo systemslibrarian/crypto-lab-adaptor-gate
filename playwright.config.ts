@@ -38,6 +38,13 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], colorScheme: 'dark' },
     },
     { name: 'claims', testMatch: /claims\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
+    {
+      // Snapshots are Chromium-only and deterministic: a pixel oracle run across
+      // three engines would need three baselines of the same intent.
+      name: 'visual',
+      testMatch: /visual\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], colorScheme: 'dark' },
+    },
     { name: 'flows-chromium', testMatch: /flows\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
     { name: 'flows-firefox', testMatch: /flows\.spec\.ts/, use: { ...devices['Desktop Firefox'] } },
     { name: 'flows-webkit', testMatch: /flows\.spec\.ts/, use: { ...devices['Desktop Safari'] } },

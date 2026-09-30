@@ -58,6 +58,14 @@ export interface SwapStep {
   status: 'ok' | 'blocked' | 'alarm'
 }
 
+/** What each participant knows at a given point in the sequence. */
+export interface ActorLane {
+  who: string
+  knowsT: boolean
+  holdsPreSignature: string
+  claimed: string
+}
+
 export interface SwapRun {
   steps: SwapStep[]
   Tx: XOnly
@@ -82,6 +90,68 @@ export interface SwapRun {
   earlyClaimReason: string
   /** True when Bob paid and got nothing -- the fixture the negative claim needs. */
   bobLostFunds: boolean
+}
+
+/**
+ * The run, revealed one transition at a time.
+ *
+ * The state machine is unchanged and still deterministic -- what `cursor` adds is the
+ * ability to SHOW the sequence rather than print its ending. The template's teaching
+ * standard asks for the mechanism to be stepped rather than asserted, and an ordered
+ * protocol whose ordering is the lesson is exactly the case where rendering the
+ * finished result throws away what the reader needed to see.
+ */
+export interface SteppedSwap {
+  run: SwapRun
+  /** How many transitions are currently revealed. */
+  cursor: number
+  total: number
+}
+
+export function startSwap(opts: SwapOptions): SteppedSwap {
+  const run = runSwap(opts)
+  return { run, cursor: 1, total: run.steps.length }
+}
+
+export function swapNext(s: SteppedSwap): SteppedSwap {
+  return { ...s, cursor: Math.min(s.cursor + 1, s.total) }
+}
+
+export function swapAll(s: SteppedSwap): SteppedSwap {
+  return { ...s, cursor: s.total }
+}
+
+export const swapFinished = (s: SteppedSwap): boolean => s.cursor >= s.total
+
+/**
+ * Who knows what, after `cursor` transitions. Derived from the run rather than
+ * tracked separately, so the lanes cannot drift from the steps they describe.
+ */
+export function lanesAt(s: SteppedSwap): ActorLane[] {
+  const r = s.run
+  // Step numbers are 1-based and follow runSwap's push order.
+  const titles = r.steps.map((st) => st.title)
+  const idxOf = (re: RegExp) => titles.findIndex((t) => re.test(t)) + 1
+  const preSigned = idxOf(/Both sides pre-sign/)
+  const alicePublished = idxOf(/Alice publishes/)
+  const bobExtracted = idxOf(/Bob reads ledger B/)
+  const bobPublished = idxOf(/Bob publishes/)
+  const done = (n: number) => n > 0 && s.cursor >= n
+
+  return [
+    {
+      who: 'Alice',
+      knowsT: true, // she chose it
+      holdsPreSignature: done(preSigned) ? "Bob's, for ledger B" : '\u2014',
+      claimed: done(alicePublished) && r.aliceClaimedB ? 'ledger B' : '\u2014',
+    },
+    {
+      who: 'Bob',
+      knowsT: done(bobExtracted) && r.bobExtractedT !== null,
+      holdsPreSignature: done(preSigned) ? "Alice's, for ledger A" : '\u2014',
+      claimed: done(bobPublished) && r.bobClaimedA ? 'ledger A' : '\u2014',
+    },
+  ]
 }
 
 const MSG_A = 'Ledger A: 0.10 units, Alice to Bob'

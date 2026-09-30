@@ -9,7 +9,7 @@ import { schnorr } from '@noble/curves/secp256k1.js'
 import { recoverFromNonceReuse, wrongTDemo } from '../crypto/attacks'
 import { preSign, adaptorPoint } from '../crypto/adaptor'
 import { normaliseSecret, numTo32, hex, fromHex } from '../crypto/secp'
-import { el, field, verdict, card, clear, short, pill } from './dom'
+import { el, field, verdict, card, clear, short, pill, inspect, trustRail, story, actions, button } from './dom'
 
 const SK_HEX = '0a11ce0000000000000000000000000000000000000000000000000000000001'
 const MSG = 'Alice pays Bob 0.10 units on ledger A'
@@ -18,27 +18,67 @@ const FRESH = 'I, the signer, hereby transfer everything to the attacker.'
 
 const state = { naive: false, sameT: false }
 
+export function breakUiState(): { naive: boolean; sameT: boolean } {
+  return { naive: state.naive, sameT: state.sameT }
+}
+
+export function setBreakUiState(naive: boolean, sameT: boolean): void {
+  state.naive = naive
+  state.sameT = sameT
+}
+
+let onChange: (() => void) | null = null
+export function setBreakOnChange(fn: () => void): void {
+  onChange = fn
+}
+
+function rerender(): void {
+  const panel = document.getElementById('panel-break')
+  if (panel) renderBreakIt(panel)
+  onChange?.()
+}
+
 export function renderBreakIt(root: HTMLElement): void {
   clear(root)
-  const intro = card(
-    'The nonce is the whole secret',
-    el('p', {
-      text:
-        'A Schnorr signature hides the signing key behind a one-time random value called the ' +
+  const intro = card(null)
+  intro.classList.add('intro', 'opening')
+  intro.append(
+    story(
+      'A Schnorr signature hides the signing key behind a one-time random value called the ' +
         'nonce. Sign twice with the same nonce and the two equations share an unknown, which ' +
-        'cancels — leaving the key. That is not specific to adaptor signatures, but adaptor ' +
-        'signatures add a new way to fall into it: if the nonce does not depend on which T you ' +
-        'are signing against, then pre-signing one message against two different points reuses ' +
-        'it.',
-    }),
+        'cancels \u2014 leaving the key. Adaptor signatures add a new way to fall into it: if the ' +
+        'nonce does not depend on which T you are signing against, pre-signing one message ' +
+        'against two points reuses it.',
+    ),
+  )
+  intro.append(
+    actions(
+      button('Break the nonce', { id: 'btn-break-go', primary: true }, () => {
+        state.naive = true
+        state.sameT = false
+        rerender()
+      }),
+      button('Reset exhibit', { id: 'btn-break-reset' }, () => {
+        state.naive = false
+        state.sameT = false
+        rerender()
+      }),
+    ),
+  )
+  intro.append(
     el('p', {
-      class: 'note',
+      class: 'note hint',
       text:
-        'The default nonce derivation on this page mixes x(T) into BIP-340’s nonce function, ' +
-        'so that cannot happen. The toggle below removes it.',
+        'The shipped default binds x(T) into BIP-340\u2019s nonce function, so this cannot happen ' +
+        'by accident. One press removes that binding.',
     }),
   )
-  intro.classList.add('intro')
+  intro.append(
+    trustRail(
+      { kind: 'real', text: 'the recovery runs against this page\u2019s own pre-signing function' },
+      { kind: 'real', text: "the forgery is checked by the library's verify" },
+    ),
+  )
   root.append(intro)
   root.append(toggles())
 
@@ -152,8 +192,11 @@ export function renderBreakIt(root: HTMLElement): void {
           'is entirely well-formed and commits to a different secret than you think. Only ' +
           'pre-verifying against the T you care about detects it.',
       }),
-      field('T you care about', short(hex(w.TxReal), 14), 'tone-t'),
-      field('T it actually commits to', short(hex(w.TxAttacker), 14), 'tone-t'),
+      inspect(
+        'Inspect exact values',
+        field('T you care about', short(hex(w.TxReal), 14), 'tone-t', hex(w.TxReal)),
+        field('T it actually commits to', short(hex(w.TxAttacker), 14), 'tone-t', hex(w.TxAttacker)),
+      ),
       el(
         'p',
         {},
@@ -181,8 +224,7 @@ function toggles(): HTMLElement {
     input.checked = checked
     input.addEventListener('change', () => {
       on(input.checked)
-      const panel = document.getElementById('panel-break')
-      if (panel) renderBreakIt(panel)
+      rerender()
     })
     return el('label', { for: id }, input, document.createTextNode(label))
   }

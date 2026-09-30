@@ -6,3 +6,5 @@ playwright-report/
 .DS_Store
 *.local
 .vitest/
+# Working notes / review transcripts, not part of the lab
+chat.md

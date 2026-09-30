@@ -1,17 +1,29 @@
 // PTLC routing -- MODELED. Three hops, no channel state, no fees, no network.
 //
-// The point of this exhibit is one comparison, computed from a single run rather
-// than drawn:
+// TWO THINGS THIS EXHIBIT HAS TO GET RIGHT, and the second one is easy to fake.
 //
-//   HTLC:  every hop carries H(z), THE SAME 32 BYTES. Hop 1 and hop 3 are linkable
-//          by anyone who sees both, because the identifier is literally equal.
-//   PTLC:  every hop carries a DIFFERENT point T_i. Learning one tells an observer
-//          nothing about the others.
+// 1. DECORRELATION. Every hop carries a DIFFERENT adaptor point, where an HTLC
+//    would carry the same payment hash on all of them. Both strips are computed
+//    from one run, so the comparison is a measurement rather than an illustration.
 //
-// The chain is built with real adaptor pre-signatures from ./adaptor.ts, and the
-// secrets really do propagate backward: each node extracts the secret for the hop it
-// paid, adds its own blinding scalar, and that is the secret it needs to claim its
-// own incoming hop.
+// 2. CAUSALITY. Settlement runs backward, and each hop must be completed with the
+//    secret its payee DERIVED from the hop it just paid -- extracted value plus its
+//    own blinding scalar -- not with a value precomputed by the route builder.
+//
+//    An earlier version of this file failed (2) while appearing to pass it. It
+//    computed every hop secret up front and then settled each hop with its own
+//    precomputed `secret`, recording the extracted value alongside for display. The
+//    numbers matched, the screen said "extraction propagates backward", and a test
+//    separately proved the derivation *could* work -- but the state transition took
+//    a shortcut, so corrupting a downstream signature would not have stopped an
+//    upstream hop. Right answer, wrong causal chain.
+//
+//    The fix is structural rather than a comment: `settleNext` below has access to
+//    exactly one secret, `carried`, and that is the only value it can complete a hop
+//    with. The precomputed secrets survive only as an EXPECTED value to compare
+//    against, never as an input to settlement. Break the chain anywhere and every
+//    hop upstream of the break stops -- which is what `corrupt` exists to
+//    demonstrate, and what ptlc.test.ts asserts.
 //
 // A note on the brief: its scope and this exhibit's heading both say THREE hops,
 // while its example path names three parties (Alice -> Bob -> Carol), which is two
@@ -22,9 +34,10 @@
 // bytes, so the scalar behind it is always the even-y one. A node that adds its
 // blinding must therefore re-normalise afterwards -- and it CAN, locally, because
 // normalisation is a deterministic public function of the scalar. That is why the
-// chain below reads `adaptorPoint(previous + blinding)` at every step rather than
-// plain addition.
+// derivation below reads `adaptorPoint(extracted + blinding)` rather than a plain
+// addition.
 
+import { schnorr } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { preSign, preVerify, adapt, extract, adaptorPoint } from './adaptor'
 import { mod, numTo32, hex, normaliseSecret, N } from './secp'
@@ -36,9 +49,14 @@ export interface HopSpec {
   payee: string
   /** The payer's signing key for this hop's modeled channel output. */
   payerSecretKey: Uint8Array
-  /** Blinding scalar the payee of this hop was handed, to derive the secret. */
+  /**
+   * Blinding scalar handed to the payee of THIS hop. After settling hop i, the
+   * payee adds this to what it extracted to get the secret for hop i-1.
+   */
   blinding: bigint
 }
+
+export type HopStatus = 'waiting' | 'settled' | 'blocked'
 
 export interface HopResult {
   index: number
@@ -46,106 +64,233 @@ export interface HopResult {
   payee: string
   /** PTLC: this hop's adaptor point, x-only. Differs per hop. */
   Tx: XOnly
-  /** The normalised secret that unlocks this hop. */
-  secret: bigint
+  /**
+   * The secret the route builder intended for this hop. Used ONLY as an expected
+   * value to compare the derived one against -- never as an input to settlement.
+   */
+  expectedSecret: bigint
   /** HTLC contrast: the payment hash, IDENTICAL on every hop. */
   htlcHash: XOnly
   publicKey: XOnly
+  message: Uint8Array
+  /**
+   * The blinding scalar the PAYEE of this hop holds. After this hop settles, that
+   * payee adds it to what it extracted to derive the secret for the hop upstream.
+   * It lives on the state because settlement must be able to reach it -- and must
+   * NOT be able to reach the route builder's precomputed secrets.
+   */
+  blinding: bigint
   pre: PreSignature
   preVerifies: boolean
-  /** Filled in during settlement, which runs backward from the last hop. */
-  settled: boolean
-  /** The secret the payer EXTRACTED from the completed signature. */
+  status: HopStatus
+  /** The secret this hop was actually completed with, if it settled. */
+  usedSecret: bigint | null
+  /** What the payer extracted from the published signature. */
   extractedSecret: bigint | null
   extractionMatches: boolean
   signature: Uint8Array | null
+  /** Set when the hop could not settle, naming why. */
+  blockedReason: string
 }
 
-export interface PtlcRun {
+/** Ways to break the chain, for the exhibit's break-it controls. */
+export interface PtlcFaults {
+  /** Corrupt the signature published at this hop index (1-based), so extraction fails. */
+  corruptSignatureAtHop?: number
+  /** Give the payee of this hop (1-based) the wrong blinding scalar. */
+  wrongBlindingAtHop?: number
+}
+
+export interface PtlcState {
   hops: HopResult[]
-  /** Dave's invoice secret. */
   z: bigint
   paymentPointX: XOnly
   htlcHash: XOnly
-  /** Distinct PTLC points across hops -- should equal the hop count. */
+  message: string
+  faults: PtlcFaults
+  /** Index of the hop that settles next. Starts at the LAST hop. -1 when finished. */
+  cursor: number
+  /**
+   * The only secret settlement may use. Seeded with z (which only the recipient
+   * knows) and thereafter replaced by each hop's derived value. null means the
+   * chain is broken and nothing upstream can settle.
+   */
+  carried: bigint | null
+  /** Human-readable transitions, in the order they happened. */
+  log: string[]
+  broken: boolean
+  brokenReason: string
   distinctPtlcPoints: number
-  /** Distinct HTLC hashes across hops -- should be 1. */
   distinctHtlcHashes: number
-  settledInOrder: string[]
 }
 
 /**
- * Build the hop chain from the recipient backward, then settle it backward too.
+ * Build the route. Alice, who constructs the path, is the one party who legitimately
+ * knows z and every blinding, so she can derive every hop point up front:
  *
- * Points:  T_3 = z*G,  T_2 = (t_3 + b_3)*G,  T_1 = (t_2 + b_2)*G   (each normalised)
- * Secrets: t_3 = z,    t_2 = t_3 + b_3,      t_1 = t_2 + b_2       (each normalised)
+ *   t_3 = z,   t_2 = norm(t_3 + b_3),   t_1 = norm(t_2 + b_2)
  *
- * so the payee of hop i can always derive t_i from the t_{i+1} it just extracted
- * plus the blinding it was given -- and nobody except Alice can see that hop 1 and
- * hop 3 belong to one payment.
+ * Nothing is settled here. Settlement is `settleNext`.
  */
-export function runPtlc(hops: HopSpec[], z: bigint, message: string): PtlcRun {
+export function startPtlc(
+  hops: HopSpec[],
+  z: bigint,
+  message: string,
+  faults: PtlcFaults = {},
+): PtlcState {
   if (hops.length < 2) throw new Error('a routed payment needs at least two hops')
   const htlcHash = sha256(numTo32(mod(z)))
-
-  // Secrets, from the recipient backward.
   const last = hops.length - 1
+
   const secrets: bigint[] = new Array(hops.length)
   secrets[last] = adaptorPoint(z).t
   for (let i = last - 1; i >= 0; i--) {
-    // The payee of hop i holds hops[i+1].blinding; it adds it to what it extracted
-    // from hop i+1 and re-normalises. Same computation Alice made when building T_i.
     secrets[i] = adaptorPoint(mod(secrets[i + 1] + hops[i + 1].blinding)).t
   }
 
   const results: HopResult[] = hops.map((h, i) => {
     const ad = adaptorPoint(secrets[i])
     const { publicKey } = normaliseSecret(h.payerSecretKey)
-    const hopMsg = new TextEncoder().encode(`${message} [hop ${h.index}: ${h.payer} -> ${h.payee}]`)
-    const pre = preSign(h.payerSecretKey, hopMsg, ad.Tx, { auxRand: numTo32(BigInt(i + 1)) })
+    const msg = hopMessage(message, h)
+    const pre = preSign(h.payerSecretKey, msg, ad.Tx, { auxRand: numTo32(BigInt(i + 1)) })
     return {
       index: h.index,
       payer: h.payer,
       payee: h.payee,
       Tx: ad.Tx,
-      secret: ad.t,
+      expectedSecret: ad.t,
       htlcHash,
       publicKey,
+      message: msg,
+      blinding: h.blinding,
       pre,
-      preVerifies: preVerify(pre, publicKey, hopMsg, ad.Tx).ok,
-      settled: false,
+      preVerifies: preVerify(pre, publicKey, msg, ad.Tx).ok,
+      status: 'waiting',
+      usedSecret: null,
       extractedSecret: null,
       extractionMatches: false,
       signature: null,
+      blockedReason: '',
     }
   })
-
-  // Settlement runs BACKWARD: the last hop settles first, and each extraction is
-  // what makes the hop before it settleable.
-  const settledInOrder: string[] = []
-  for (let i = last; i >= 0; i--) {
-    const r = results[i]
-    const { signature } = adapt(r.pre, r.secret)
-    const ex = extract(r.pre, signature, r.Tx)
-    r.signature = signature
-    r.settled = true
-    r.extractedSecret = ex.ok ? ex.t : null
-    r.extractionMatches = ex.ok && ex.t === r.secret
-    settledInOrder.push(`hop ${r.index} (${r.payer} -> ${r.payee})`)
-  }
-
-  const ptlcSet = new Set(results.map((r) => hex(r.Tx)))
-  const htlcSet = new Set(results.map((r) => hex(r.htlcHash)))
 
   return {
     hops: results,
     z: mod(z),
     paymentPointX: adaptorPoint(z).Tx,
     htlcHash,
-    distinctPtlcPoints: ptlcSet.size,
-    distinctHtlcHashes: htlcSet.size,
-    settledInOrder,
+    message,
+    faults,
+    cursor: last,
+    // ONLY the recipient starts with z.
+    carried: adaptorPoint(z).t,
+    log: [],
+    broken: false,
+    brokenReason: '',
+    distinctPtlcPoints: new Set(results.map((r) => hex(r.Tx))).size,
+    distinctHtlcHashes: new Set(results.map((r) => hex(r.htlcHash))).size,
   }
+}
+
+export function hopMessage(message: string, h: { index: number; payer: string; payee: string }): Uint8Array {
+  return new TextEncoder().encode(`${message} [hop ${h.index}: ${h.payer} -> ${h.payee}]`)
+}
+
+export const ptlcFinished = (s: PtlcState): boolean => s.cursor < 0
+
+/**
+ * Settle ONE hop, the one at the cursor, and move the cursor upstream.
+ *
+ * The hop is completed with `state.carried` and with nothing else. That is the whole
+ * causal argument: this function cannot reach the route builder's precomputed
+ * secrets, so a hop settles if and only if the value that arrived from downstream is
+ * the right one.
+ */
+export function settleNext(state: PtlcState): PtlcState {
+  if (ptlcFinished(state)) return state
+  const i = state.cursor
+  const hops = state.hops.map((h) => ({ ...h }))
+  const r = hops[i]
+  const log = [...state.log]
+
+  // The chain is already broken: this hop cannot settle, and neither can any before it.
+  if (state.carried === null) {
+    r.status = 'blocked'
+    r.blockedReason =
+      'no usable secret arrived from downstream, so there is nothing to complete this ' +
+      'pre-signature with'
+    log.push(`hop ${r.index} BLOCKED — ${r.blockedReason}`)
+    return { ...state, hops, log, cursor: i - 1 }
+  }
+
+  // Complete with the carried value, and ONLY the carried value.
+  const used = state.carried
+  const { signature } = adapt(r.pre, used)
+  r.usedSecret = used
+
+  // Fault injection: a corrupted publication at this hop.
+  let published = signature
+  if (state.faults.corruptSignatureAtHop === r.index) {
+    published = new Uint8Array(signature)
+    published[63] ^= 0x01
+  }
+  r.signature = published
+
+  // Does the real verifier accept what was published? This is the modeled channel's
+  // only spend rule, and it is a real BIP-340 check.
+  const accepted = schnorr.verify(published, r.message, r.publicKey)
+  if (!accepted) {
+    r.status = 'blocked'
+    r.blockedReason =
+      state.faults.corruptSignatureAtHop === r.index
+        ? 'the signature published at this hop is corrupt, so the channel rejects it'
+        : 'the completed signature is not valid under this hop payer key'
+    log.push(`hop ${r.index} BLOCKED — ${r.blockedReason}`)
+    return {
+      ...state,
+      hops,
+      log,
+      cursor: i - 1,
+      carried: null,
+      broken: true,
+      brokenReason: r.blockedReason,
+    }
+  }
+
+  r.status = 'settled'
+  log.push(`hop ${r.index} settled (${r.payer} -> ${r.payee})`)
+
+  // The PAYER of this hop now extracts from what was published. Nothing is handed
+  // to it.
+  const ex = extract(r.pre, published, r.Tx)
+  r.extractedSecret = ex.ok ? ex.t : null
+  r.extractionMatches = ex.ok && ex.t === r.expectedSecret
+
+  if (!ex.ok) {
+    log.push(`hop ${r.index} extraction FAILED — ${ex.reason}`)
+    return { ...state, hops, log, cursor: i - 1, carried: null, broken: true, brokenReason: ex.reason }
+  }
+
+  // Derive the secret for the hop UPSTREAM of this one: what was just extracted,
+  // plus the blinding this payee holds, re-normalised for the x-only convention.
+  let carried: bigint | null = null
+  if (i > 0) {
+    const blinding =
+      state.faults.wrongBlindingAtHop === r.index ? mod(r.blinding + 1n) : r.blinding
+    carried = adaptorPoint(mod(ex.t + blinding)).t
+    log.push(
+      `hop ${r.index} payer derived the hop ${r.index - 1} secret from what it extracted`,
+    )
+  }
+
+  return { ...state, hops, log, cursor: i - 1, carried }
+}
+
+export function settleAll(state: PtlcState): PtlcState {
+  let s = state
+  let guard = 0
+  while (!ptlcFinished(s) && guard++ < 64) s = settleNext(s)
+  return s
 }
 
 /** Default three-hop path, deterministic so the page and the tests agree. */

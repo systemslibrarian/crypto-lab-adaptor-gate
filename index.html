@@ -26,7 +26,12 @@
       content="Real BIP-340 Schnorr adaptor signatures over secp256k1: pre-sign, adapt, extract, atomic swap, PTLC decorrelation, and nonce-reuse key recovery."
     />
     <meta property="og:url" content="https://systemslibrarian.github.io/crypto-lab-adaptor-gate/" />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content="https://systemslibrarian.github.io/crypto-lab-adaptor-gate/social-preview.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Adaptor Gate — BIP-340 Schnorr adaptor signatures over secp256k1" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://systemslibrarian.github.io/crypto-lab-adaptor-gate/social-preview.png" />
     <meta name="twitter:title" content="Adaptor Gate — crypto-lab" />
     <meta
       name="twitter:description"
@@ -175,31 +180,30 @@
           <h1 class="cl-hero-title">Adaptor Gate</h1>
           <p class="cl-hero-sub">BIP-340 Schnorr adaptor signatures · secp256k1</p>
           <p class="cl-hero-desc">
-            Pre-sign a message against a public point <code>T</code>, watch the real BIP-340
-            verifier reject that pre-signature, add the secret <code>t</code> to get a signature it
-            accepts — then subtract the two and read <code>t</code> straight back out.
+            Add a secret to a pre-signature the real BIP-340 verifier rejects, and subtract the two
+            signatures to read that secret straight back out.
           </p>
         </div>
         <aside class="cl-hero-why" aria-label="Why it matters">
           <span class="cl-hero-why-label">WHY IT MATTERS</span>
           <p class="cl-hero-why-text">
-            Publishing a signature normally tells the world one thing: you authorised something.
-            A completed adaptor signature leaks a second thing — a secret — to whoever held the
-            pre-signature. Cross-chain swaps and Lightning's PTLCs are both built on that one
-            leak being unavoidable, which is why it has to be exactly the secret you meant.
+            Cross-chain swaps and Lightning's PTLCs both rest on that leak being unavoidable. So a
+            pre-signature pointing at the wrong secret costs real money, and nothing but checking
+            it will tell you.
           </p>
         </aside>
       </header>
 
       <nav class="tabs" aria-label="Exhibits">
         <div class="tab-list" role="tablist" aria-label="Adaptor Gate exhibits">
-          <button class="tab-btn" role="tab" id="tab-relation" aria-selected="true" aria-controls="panel-relation" data-panel="relation">The Relation</button>
-          <button class="tab-btn" role="tab" id="tab-swap" aria-selected="false" aria-controls="panel-swap" data-panel="swap" tabindex="-1">Cross-Ledger Swap</button>
-          <button class="tab-btn" role="tab" id="tab-ptlc" aria-selected="false" aria-controls="panel-ptlc" data-panel="ptlc" tabindex="-1">PTLC vs HTLC</button>
+          <button class="tab-btn" role="tab" id="tab-relation" aria-selected="true" aria-controls="panel-relation" data-panel="relation">Relation</button>
+          <button class="tab-btn" role="tab" id="tab-swap" aria-selected="false" aria-controls="panel-swap" data-panel="swap" tabindex="-1">Swap</button>
+          <button class="tab-btn" role="tab" id="tab-ptlc" aria-selected="false" aria-controls="panel-ptlc" data-panel="ptlc" tabindex="-1">PTLC</button>
           <button class="tab-btn" role="tab" id="tab-break" aria-selected="false" aria-controls="panel-break" data-panel="break" tabindex="-1">Break It</button>
-          <button class="tab-btn" role="tab" id="tab-vectors" aria-selected="false" aria-controls="panel-vectors" data-panel="vectors" tabindex="-1">Vectors &amp; Fixtures</button>
-          <button class="tab-btn" role="tab" id="tab-honesty" aria-selected="false" aria-controls="panel-honesty" data-panel="honesty" tabindex="-1">What This Is &amp; Isn't</button>
+          <button class="tab-btn" role="tab" id="tab-vectors" aria-selected="false" aria-controls="panel-vectors" data-panel="vectors" tabindex="-1">Vectors</button>
+          <button class="tab-btn" role="tab" id="tab-honesty" aria-selected="false" aria-controls="panel-honesty" data-panel="honesty" tabindex="-1">Honesty</button>
         </div>
+        <button type="button" class="btn btn-secondary reset-all" id="btn-reset-all">Reset all</button>
       </nav>
 
       <main>
