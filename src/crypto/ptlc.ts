@@ -266,6 +266,21 @@ export function settleNext(state: PtlcState): PtlcState {
   r.extractedSecret = ex.ok ? ex.t : null
   r.extractionMatches = ex.ok && ex.t === r.expectedSecret
 
+  // DEFENCE IN DEPTH, AND CURRENTLY UNREACHABLE -- said plainly rather than left to
+  // look like live coverage.
+  //
+  // Extraction can only fail here if the published signature VERIFIED (checked
+  // above) and yet s - s-hat does not recover the secret behind this hop's T. It
+  // cannot: the signature verifies only when the hop was completed with the one
+  // scalar T commits to, and that is exactly the scalar the subtraction returns. A
+  // corrupted publication fails the verify check first and returns before reaching
+  // this point. A mutation that keeps `carried` alive here therefore changes no test
+  // -- which is a fact about this branch, not a gap in the suite, and
+  // ptlc.test.ts asserts the unreachability directly.
+  //
+  // It stays because the reachability argument depends on the verify check above
+  // remaining in front of it, and a guard that costs nothing is worth more than a
+  // comment promising the same thing.
   if (!ex.ok) {
     log.push(`hop ${r.index} extraction FAILED — ${ex.reason}`)
     return { ...state, hops, log, cursor: i - 1, carried: null, broken: true, brokenReason: ex.reason }

@@ -783,6 +783,31 @@ test.describe('PTLC — causality is on screen, not just in prose', () => {
     await expect(page.locator('#panel-ptlc')).toContainText('no usable secret arrived from downstream')
   })
 
+  test('a WRONG BLINDING stalls upstream even though signature and extraction are correct', async ({
+    page,
+  }) => {
+    // THE claim that separates a causal model from a precomputed one. A corrupt
+    // signature is caught by the guard that stops once nothing usable arrived; only
+    // this fault reaches the case where a hop settles perfectly, its extraction
+    // matches, and the value DERIVED for the hop above it is wrong. A model that
+    // settled each hop from a precomputed secret would sail straight through it.
+    await boot(page)
+    await page.getByRole('tab', { name: /^PTLC$/ }).click()
+    await page.locator('#ptlc-blind-3').check()
+    await page.locator('#btn-ptlc-all').click()
+
+    const row = (hop: string) => page.locator('#panel-ptlc tbody tr', { hasText: hop }).first()
+    // hop 3 is entirely healthy: settled, and its extraction matched.
+    await expect(row('hop 3')).toContainText('settled')
+    await expect(row('hop 3').locator('.pill-ok', { hasText: 'matches' })).toHaveCount(1)
+    // ...and the hops above it still cannot settle.
+    await expect(row('hop 2')).toContainText('BLOCKED')
+    await expect(row('hop 1')).toContainText('BLOCKED')
+    await expect(page.locator('#panel-ptlc .verdict-alarm')).toContainText('chain is broken')
+    // The page names the cause precisely: not a bad signature, not a bad extraction.
+    await expect(page.locator('#panel-ptlc')).toContainText('not valid under this hop payer key')
+  })
+
   test('corrupting the FIRST hop stalls nothing else — the break is directional', async ({ page }) => {
     await boot(page)
     await page.getByRole('tab', { name: /^PTLC$/ }).click()

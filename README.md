@@ -93,8 +93,11 @@ anything of value.
 3. **PTLC vs HTLC** — three hops, both strips computed from one run: three distinct adaptor
    points against one repeated hash. Settlement is **causal**, not narrated — it starts at
    the last hop, and each hop can only be completed with the secret its payee *derived* from
-   the hop below it (extracted value plus its own blinding). Corrupt any hop's published
-   signature and every hop upstream of it stalls, while hops downstream are unaffected.
+   the hop below it (extracted value plus its own blinding). Two break controls: corrupt a
+   hop's published signature, or hand a payee the wrong blinding scalar. Both stall every
+   hop upstream and leave those downstream untouched, and they fail for different reasons —
+   the second is the sharper one, because that hop's signature is valid and its extraction
+   is exactly right, and the hop above it still cannot settle.
 4. **Break It** — the naive-nonce toggle makes two pre-signatures on one message share a
    nonce; the key falls out and a forged signature on a fresh message is accepted by the
    library. A second toggle shows the edge case where the nonce *is* reused and the key is
@@ -134,6 +137,7 @@ exactly what you were looking at and survives refresh and Back. A presenter path
 | an honest swap | [`#e=swap&sc=7`](https://systemslibrarian.github.io/crypto-lab-adaptor-gate/#e=swap&sc=7) |
 | the swap loss | [`#e=swap&cheat=1&skip=1&sc=7`](https://systemslibrarian.github.io/crypto-lab-adaptor-gate/#e=swap&cheat=1&skip=1&sc=7) |
 | PTLC, chain broken | [`#e=ptlc&corrupt=2&hops=3`](https://systemslibrarian.github.io/crypto-lab-adaptor-gate/#e=ptlc&corrupt=2&hops=3) |
+| PTLC, wrong blinding | [`#e=ptlc&blind=3&hops=3`](https://systemslibrarian.github.io/crypto-lab-adaptor-gate/#e=ptlc&blind=3&hops=3) |
 | nonce reuse | [`#e=break&naive=1`](https://systemslibrarian.github.io/crypto-lab-adaptor-gate/#e=break&naive=1) |
 
 Inputs are deterministic, so two people opening the same link see the same proof.
@@ -220,12 +224,12 @@ Playwright browsers: `npx playwright install --with-deps chromium firefox webkit
 
 ```bash
 npm run build       # tsc --noEmit && vite build
-npm test            # 124 unit tests across 7 files (Vitest)
-npm run test:a11y   # 115 browser tests: axe WCAG gate, claims, visual snapshots,
+npm test            # 125 unit tests across 7 files (Vitest)
+npm run test:a11y   # 116 browser tests: axe WCAG gate, claims, visual snapshots,
                     # and functional flows in 4 browsers
 ```
 
-**Unit tests — 124, all passing.**
+**Unit tests — 125, all passing.**
 
 | suite | what it pins |
 |---|---|
@@ -244,13 +248,13 @@ Schnorr adaptor vectors** — neither BIP-327 nor secp256k1-zkp publishes any �
 lab's adaptor fixtures in `src/crypto/fixtures.ts` are self-derived, are never labelled
 official, and are guarded by the independent re-derivation above.
 
-**Browser gates — 115 tests.**
+**Browser gates — 116 tests.**
 
 - `e2e/a11y.spec.ts` — the axe-core WCAG 2.1 A/AA gate, run against the **production
   build** at desktop and 380px. Zero violations and zero `incomplete` findings; contrast is
   additionally computed arithmetically, and the non-text (1.4.11) baseline is **empty**,
   measured for this lab rather than inherited.
-- `e2e/claims.spec.ts` — 40 claims that the page tells the truth: cross-checks between
+- `e2e/claims.spec.ts` — 41 claims that the page tells the truth: cross-checks between
   surfaces, parts-sum-to-whole over the vector classes and fixture rows, and independent
   re-derivations evaluated in the browser with arithmetic sharing no code with the bundle.
   Includes the negative-claim fixture (every check green, funds gone, the limitation on

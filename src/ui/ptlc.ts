@@ -45,12 +45,18 @@ function routeArgs(): [ReturnType<typeof defaultPtlcPath>['hops'], bigint, strin
   return [hops, z, message]
 }
 
-export function ptlcUiState(): { corrupt: number; cursorFromEnd: number } {
-  return { corrupt: faults.corruptSignatureAtHop ?? 0, cursorFromEnd: run.hops.length - 1 - run.cursor }
+export function ptlcUiState(): { corrupt: number; blind: number; cursorFromEnd: number } {
+  return {
+    corrupt: faults.corruptSignatureAtHop ?? 0,
+    blind: faults.wrongBlindingAtHop ?? 0,
+    cursorFromEnd: run.hops.length - 1 - run.cursor,
+  }
 }
 
-export function setPtlcUiState(corrupt: number, settled: number): void {
-  faults = corrupt ? { corruptSignatureAtHop: corrupt } : {}
+export function setPtlcUiState(corrupt: number, blind: number, settled: number): void {
+  faults = {}
+  if (corrupt) faults.corruptSignatureAtHop = corrupt
+  if (blind) faults.wrongBlindingAtHop = blind
   run = startPtlc(...routeArgs(), faults)
   for (let i = 0; i < settled; i++) run = settleNext(run)
 }
@@ -143,35 +149,64 @@ export function renderPtlc(root: HTMLElement): void {
 
 function breakControls(): HTMLElement {
   const c = card('Break the chain')
-  const row = el('div', { class: 'toggle-row' })
-  for (const h of run.hops) {
-    const id = `ptlc-corrupt-${h.index}`
-    const input = el('input', { type: 'radio', name: 'ptlc-corrupt', id }) as HTMLInputElement
-    input.checked = faults.corruptSignatureAtHop === h.index
-    input.addEventListener('change', () => {
-      faults = { corruptSignatureAtHop: h.index }
-      restart()
-      rerender()
-    })
-    row.append(el('label', { for: id }, input, document.createTextNode(` corrupt hop ${h.index}`)))
-  }
-  const noneId = 'ptlc-corrupt-none'
-  const none = el('input', { type: 'radio', name: 'ptlc-corrupt', id: noneId }) as HTMLInputElement
-  none.checked = !faults.corruptSignatureAtHop
-  none.addEventListener('change', () => {
-    faults = {}
-    restart()
-    rerender()
-  })
-  row.prepend(el('label', { for: noneId }, none, document.createTextNode(' none (honest)')))
 
-  const fs = el('fieldset', { class: 'radio-row' })
-  fs.append(el('legend', { text: 'Corrupt a published signature' }), row)
+  const group = (
+    name: string,
+    legend: string,
+    selected: number,
+    onPick: (hop: number) => void,
+    idPrefix: string,
+  ) => {
+    const row = el('div', { class: 'toggle-row' })
+    const noneId = `${idPrefix}-none`
+    const none = el('input', { type: 'radio', name, id: noneId }) as HTMLInputElement
+    none.checked = selected === 0
+    none.addEventListener('change', () => onPick(0))
+    row.append(el('label', { for: noneId }, none, document.createTextNode(' none')))
+    for (const h of run.hops) {
+      const id = `${idPrefix}-${h.index}`
+      const input = el('input', { type: 'radio', name, id }) as HTMLInputElement
+      input.checked = selected === h.index
+      input.addEventListener('change', () => onPick(h.index))
+      row.append(el('label', { for: id }, input, document.createTextNode(` hop ${h.index}`)))
+    }
+    const fs = el('fieldset', { class: 'radio-row' })
+    fs.append(el('legend', { text: legend }), row)
+    return fs
+  }
+
   c.append(
-    fs,
+    group(
+      'ptlc-corrupt',
+      'Corrupt a published signature',
+      faults.corruptSignatureAtHop ?? 0,
+      (hop) => {
+        faults = hop ? { corruptSignatureAtHop: hop } : {}
+        restart()
+        rerender()
+      },
+      'ptlc-corrupt',
+    ),
+    group(
+      'ptlc-blind',
+      'Give a payee the wrong blinding scalar',
+      faults.wrongBlindingAtHop ?? 0,
+      (hop) => {
+        faults = hop ? { wrongBlindingAtHop: hop } : {}
+        restart()
+        rerender()
+      },
+      'ptlc-blind',
+    ),
     el('p', {
       class: 'note',
-      text: 'Corrupting a hop stops that hop and every hop UPSTREAM of it, because the upstream payee never receives a usable secret to derive from. Hops downstream of the break are unaffected — the break propagates in one direction only.',
+      text:
+        'Both faults stop the hop above and leave the hops below untouched \u2014 the break ' +
+        'propagates in one direction only. They fail for DIFFERENT reasons, and the second is ' +
+        'the sharper lesson: a corrupt signature is rejected by the channel, but a wrong ' +
+        'blinding produces a hop whose signature is fine and whose extraction is exactly ' +
+        'right, and the hop above it still cannot settle \u2014 because the value derived for ' +
+        'it was not the secret its point commits to.',
     }),
   )
   return c

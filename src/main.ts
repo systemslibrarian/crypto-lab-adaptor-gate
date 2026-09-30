@@ -57,6 +57,7 @@ function writeUrl(push: boolean): void {
   if (sw.cursor > 1) p.set('sc', String(sw.cursor))
   const pt = ptlcUiState()
   if (pt.corrupt) p.set('corrupt', String(pt.corrupt))
+  if (pt.blind) p.set('blind', String(pt.blind))
   if (pt.cursorFromEnd > 0) p.set('hops', String(pt.cursorFromEnd))
   const br = breakUiState()
   if (br.naive) p.set('naive', '1')
@@ -76,7 +77,11 @@ function applyUrl(): void {
       p.get('t') === 'wrong',
     )
     setSwapUiState(p.get('cheat') === '1', p.get('skip') === '1', Number(p.get('sc') ?? '1') || 1)
-    setPtlcUiState(Number(p.get('corrupt') ?? '0') || 0, Number(p.get('hops') ?? '0') || 0)
+    setPtlcUiState(
+      Number(p.get('corrupt') ?? '0') || 0,
+      Number(p.get('blind') ?? '0') || 0,
+      Number(p.get('hops') ?? '0') || 0,
+    )
     setBreakUiState(p.get('naive') === '1', p.get('samet') === '1')
     // Re-render anything already on screen so it reflects the restored state.
     rendered.clear()

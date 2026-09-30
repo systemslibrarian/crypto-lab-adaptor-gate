@@ -210,6 +210,33 @@ describe('CAUSALITY — breaking the chain stops every hop upstream of the break
   })
 })
 
+describe('the extraction-failure guard is unreachable, and that is the claim', () => {
+  it('a settled hop always extracts, because verify gates it', () => {
+    // A mutation that lets the chain continue past an extraction failure changes no
+    // test, and §4.1c says to establish whether that is a weak suite or a dead
+    // branch. It is a dead branch, and this is the argument as a test: across every
+    // fault this exhibit can reach, no hop is ever both accepted and unextractable.
+    for (const faults of [
+      {},
+      { corruptSignatureAtHop: 1 },
+      { corruptSignatureAtHop: 2 },
+      { corruptSignatureAtHop: 3 },
+      { wrongBlindingAtHop: 2 },
+      { wrongBlindingAtHop: 3 },
+    ]) {
+      const run = settleAll(fresh(faults))
+      for (const h of run.hops) {
+        if (h.status === 'settled') {
+          // settled means the real verifier accepted it...
+          expect(schnorr.verify(h.signature!, h.message, h.publicKey), `hop ${h.index}`).toBe(true)
+          // ...and then extraction cannot fail.
+          expect(h.extractedSecret, `hop ${h.index} must extract`).not.toBeNull()
+        }
+      }
+    }
+  })
+})
+
 describe('the derivation a payee performs is reproducible by hand', () => {
   it('extract, add your blinding, re-normalise — and you have the next hop secret', () => {
     const run = settleAll(fresh())
