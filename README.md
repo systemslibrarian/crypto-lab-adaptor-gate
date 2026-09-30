@@ -224,12 +224,12 @@ Playwright browsers: `npx playwright install --with-deps chromium firefox webkit
 
 ```bash
 npm run build       # tsc --noEmit && vite build
-npm test            # 125 unit tests across 7 files (Vitest)
+npm test            # 127 unit tests across 8 files (Vitest)
 npm run test:a11y   # 116 browser tests: axe WCAG gate, claims, visual snapshots,
                     # and functional flows in 4 browsers
 ```
 
-**Unit tests — 125, all passing.**
+**Unit tests — 127, all passing.**
 
 | suite | what it pins |
 |---|---|
@@ -239,6 +239,7 @@ npm run test:a11y   # 116 browser tests: axe WCAG gate, claims, visual snapshots
 | `src/crypto/adaptor-independent.test.ts` | **The independent re-derivation.** A self-contained affine BigInt secp256k1 — its own modular inverse, point addition, ladder, `lift_x` and tagged hash — that imports neither `adaptor.ts` nor the library's `Point`, and agrees on every intermediate value. |
 | `src/crypto/attacks.test.ts` | Nonce-reuse recovery on both algebraic branches, with a test proving the sum branch is load-bearing. |
 | `src/crypto/swap.test.ts` | Swap atomicity, the ledger's real signature checks, and the wrong-`T` loss. |
+| `src/ci-pins.test.ts` | That CI's Playwright container tag still matches the installed `@playwright/test`, and that the preview port is a single literal all three config sites read. |
 | `src/crypto/ptlc.test.ts` | Per-hop decorrelation, and the **causality** of settlement: that each hop consumes the value extracted from the hop below it, and that corrupting a signature or a blinding stalls every hop upstream while leaving those downstream untouched. |
 
 **KAT files.** `src/vectors/bip340-test-vectors.csv`, vendored byte-for-byte from
@@ -263,7 +264,11 @@ official, and are guarded by the independent re-derivation above.
 - `e2e/flows.spec.ts` — functional walkthroughs of every exhibit in Chromium, Firefox,
   WebKit and a mobile viewport.
 - `e2e/visual.spec.ts` — 13 focused snapshots, baselined for **both** macOS and Linux so
-  the gate runs locally and in CI rather than only where it was authored. Deliberately
+  the gate runs locally and in CI rather than only where it was authored. CI runs the
+  browser gate **inside the Playwright container**, because the bare `ubuntu-latest` runner
+  does not render text identically to the image the baselines came from — comparing across
+  the two failed all 13 on the first run, and re-baselining against the runner would have
+  tied them to an image that changes underneath. Deliberately
   narrow: the opening states, the mechanism in each of its three readings, the three swap
   outcomes, the two nonce modes, and PTLC settlement at its first, final and broken
   transitions. The giant vector tables are not snapshotted — the claims suite already
