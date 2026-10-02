@@ -12,9 +12,9 @@ import { defineConfig, devices } from '@playwright/test'
  * 4681 was chosen after sweeping every sibling `playwright.config.ts` AND the
  * catalog's own `tools/playwright-ports.json` registry (178 entries). Worth
  * recording: the grep the template suggests, `localhost:[0-9]+`, is NOT sufficient
- * -- configs that build the URL from a template literal (`const PORT = 4649` with
+ * -- configs that build the URL from a template literal (`const PORT = 4712` with
  * `http://localhost:${PORT}`) are invisible to it, and crypto-lab-hpke-envelope
- * holds 4649 exactly that way. Sweep for `PORT =` and `--port` too.
+ * holds 4712 exactly that way. Sweep for `PORT =` and `--port` too.
  */
 const PORT = 4681
 const BASE = '/crypto-lab-adaptor-gate/'
