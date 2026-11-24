@@ -25,7 +25,7 @@ jobs:
       # The ordinary deploy gate remains unchanged. All other visual baselines
       # must still pass before these two images can be accepted for review.
       - name: Render the two changed states
-        run: npx playwright test --project=visual --grep 'phone opening, first viewport|mismatched' --update-snapshots
+        run: npx playwright test --project=visual --grep 'phone opening, first viewport|mismatched' --update-snapshots=all
       - name: Verify every macOS visual state
         run: npx playwright test --project=visual
       - name: Save images for visual review
