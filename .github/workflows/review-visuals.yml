@@ -1,0 +1,40 @@
+name: Render reviewed macOS visual baselines
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/review-visuals.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      # Temporary rendering job for the two intentional teaching-copy changes.
+      # The ordinary deploy gate remains unchanged. All other visual baselines
+      # must still pass before these two images can be accepted for review.
+      - name: Render the two changed states
+        run: npx playwright test --project=visual --grep 'phone opening, first viewport|mismatched' --update-snapshots
+      - name: Verify every macOS visual state
+        run: npx playwright test --project=visual
+      - name: Save images for visual review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reviewed-macos-visuals
+          path: |
+            e2e/visual.spec.ts-snapshots/opening-phone-first-viewport-visual-darwin.png
+            e2e/visual.spec.ts-snapshots/mechanism-mismatch-visual-darwin.png
+            test-results/
+          retention-days: 2

@@ -127,7 +127,7 @@ test.describe('The Relation, end to end', () => {
     await boot(page)
     await openInputs(page)
     await page.locator('#supply-t').fill('01')
-    await page.getByRole('button', { name: 'Add this t and verify' }).click()
+    await page.getByRole('button', { name: 'Complete with this t and verify' }).click()
     await expect(page.locator('#panel-relation .mech-sub.not-equal')).toHaveCount(1)
     await expect(page.locator('#panel-relation')).not.toContainText('VALID BIP-340 signature')
   })
