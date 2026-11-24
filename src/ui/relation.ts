@@ -26,7 +26,7 @@ import {
   adaptorPoint,
   preSignatureAsBytes,
 } from '../crypto/adaptor'
-import { normaliseSecret, numTo32, hex, fromHex, mod, CryptoInputError } from '../crypto/secp'
+import { normaliseSecret, numTo32, hex, fromHex, mod, assertScalar, CryptoInputError } from '../crypto/secp'
 import type { PreSignature } from '../crypto/types'
 import {
   el,
@@ -123,9 +123,10 @@ function computeAll(): Computed | null {
     let completion: Computed['completion'] = null
     let recovery: Computed['recovery'] = null
 
-    if (state.stage >= 3 && state.suppliedT !== '') {
-      const supplied = state.suppliedT === 'real' ? ad.t : mod(BigInt('0x' + state.suppliedT))
-      if (supplied === 0n) throw new CryptoInputError('t = 0 is rejected: T would be the point at infinity')
+    if (state.stage >= 3) {
+      if (state.suppliedT === '') throw new CryptoInputError('Enter the adaptor secret t before completing the signature.')
+      const supplied = state.suppliedT === 'real' ? ad.t : BigInt('0x' + state.suppliedT)
+      assertScalar(supplied, 'adaptor secret t')
       const { s, signature } = adapt(pre, supplied)
       const diff = pre.parity === 'even' ? mod(s - pre.sHat) : mod(pre.sHat - s)
       completion = {
@@ -317,13 +318,13 @@ function mechanism(c: Computed): HTMLElement {
       short(hexOf(c.pre.sHat), 8),
       hexOf(c.pre.sHat),
       preOn,
-      preOn ? { ok: !c.preSigAccepted, text: 'verifier REJECTS' } : undefined,
+      preOn ? { ok: !c.preSigAccepted, text: c.preSigAccepted ? 'verifier ACCEPTS' : 'verifier REJECTS' } : undefined,
     ),
     el(
       'div',
       { class: `mech-arrow ${compOn ? 'is-on' : 'is-off'}` },
-      el('span', { 'aria-hidden': 'true', text: '+ t →' }),
-      el('span', { class: 'sr-only', text: 'plus t gives' }),
+      el('span', { 'aria-hidden': 'true', text: c.pre.parity === 'even' ? '+ t →' : '− t →' }),
+      el('span', { class: 'sr-only', text: c.pre.parity === 'even' ? 'plus t gives' : 'minus t gives' }),
     ),
     node(
       'mech-s',
@@ -343,12 +344,14 @@ function mechanism(c: Computed): HTMLElement {
     const equal = c.completion.equal
     sub.classList.add(equal ? 'is-equal' : 'not-equal')
     sub.append(
-      el('span', { class: 'mech-sub-op', text: 's − ŝ' }),
+      el('span', { class: 'mech-sub-op', text: c.pre.parity === 'even' ? 's − ŝ' : 'ŝ − s' }),
       el(
         'span',
         { class: 'mech-sub-eq' },
-        el('span', { 'aria-hidden': 'true', text: equal ? '=' : '≠' }),
-        el('span', { class: 'sr-only', text: equal ? 'equals' : 'does not equal' }),
+        // This equation shows the computed difference. Whether it equals the
+        // original secret is the separate colour/note comparison below.
+        el('span', { 'aria-hidden': 'true', text: '=' }),
+        el('span', { class: 'sr-only', text: 'equals' }),
       ),
       el('span', {
         class: 'mech-sub-val',
@@ -358,7 +361,7 @@ function mechanism(c: Computed): HTMLElement {
       el('span', { class: 'mech-sub-note', text: equal ? 'the secret, recovered' : 'not the secret behind T' }),
     )
   } else {
-    sub.append(el('span', { class: 'mech-sub-op', text: 's − ŝ' }), el('span', { class: 'mech-sub-note', text: 'not computed yet' }))
+    sub.append(el('span', { class: 'mech-sub-op', text: c.pre.parity === 'even' ? 's − ŝ' : 'ŝ − s' }), el('span', { class: 'mech-sub-note', text: 'not computed yet' }))
   }
 
   wrap.append(grid, sub)
@@ -442,7 +445,7 @@ function stage2(c: Computed): HTMLElement {
       { class: 'verdict-pair' },
       c.preSigAccepted
         ? verdict('alarm', 'BIP-340 verify ACCEPTED it', 'A pre-signature must not verify. The relation is broken.')
-        : verdict('pass', 'BIP-340 verify REJECTS it', 'Correct. It is short by exactly t.'),
+        : verdict('pass', 'BIP-340 verify REJECTS it', c.pre.parity === 'even' ? 'Correct. It is short by exactly t.' : 'Correct. The missing adaptor term is −t for this odd-y R + T.'),
       c.preVerified
         ? verdict('pass', 'Pre-verification ACCEPTS it', 'It really is a commitment to this T, under this key, over this message.')
         : verdict('fail', 'Pre-verification REJECTS it', c.preVerifyReason),
@@ -466,16 +469,16 @@ function stage3(c: Computed): HTMLElement {
   const k = c.completion!
   return stageCard(
     3,
-    'Add t and it becomes a signature',
+    c.pre.parity === 'even' ? 'Add t and it becomes a signature' : 'Subtract t and it becomes a signature',
     el('p', {
       class: 'stage-story',
       text: 'Whoever knows t can finish it. The arithmetic always produces 64 bytes; whether they are a signature is the library’s decision, not this page’s.',
     }),
     k.accepted
-      ? verdict('pass', 'VALID BIP-340 signature', "Accepted by @noble/curves' own unmodified verify.")
+      ? verdict(k.isRealT ? 'pass' : 'alarm', k.isRealT ? 'VALID BIP-340 signature' : 'Unexpected acceptance for a wrong t', "Accepted by @noble/curves' own unmodified verify.")
       : verdict(
-          'pass',
-          'REJECTED — the correct answer for a wrong t',
+          k.isRealT ? 'alarm' : 'pass',
+          k.isRealT ? 'Unexpected rejection for the real t' : 'REJECTED — the correct answer for a wrong t',
           k.isRealT
             ? 'Unexpected: this was the real t, so a rejection means the relation is broken.'
             : 'Only the t behind T completes this pre-signature. The page can tell you when you have it, never which t it is.',
@@ -510,7 +513,7 @@ function stage4(c: Computed): HTMLElement {
       r.matches
         ? verdict(
             'pass',
-            'Secret recovered from the signature alone',
+            'Secret recovered from the signature pair',
             'Publishing the completed signature published t to whoever held the pre-signature. Every other exhibit is built on that.',
           )
         : verdict('fail', 'Recovery did not reproduce t', 'Both values are printed under Inspect.'),
@@ -551,7 +554,7 @@ function inputsCard(): HTMLElement {
     state.stage = 2
     rerender()
   })
-  const complete = button('Add this t and verify', { id: 'btn-complete' }, () => {
+  const complete = button('Complete with this t and verify', { id: 'btn-complete' }, () => {
     state.suppliedT = supply.value.trim()
     state.stage = 4
     rerender()

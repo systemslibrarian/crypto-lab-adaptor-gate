@@ -17,6 +17,7 @@ import { ADAPTOR_FIXTURES, ADAPTOR_FIXTURE_MESSAGE } from '../crypto/fixtures'
 import { preSign, preVerify, adapt, extract, adaptorPoint } from '../crypto/adaptor'
 import { fromHex } from '../crypto/secp'
 import { el, verdict, card, clear, short, pill, tableWrap, field } from './dom'
+import { completeVectorSet, fixtureEvidenceAgrees, type FixtureResult } from './evidence'
 
 export function renderVectors(root: HTMLElement): void {
   clear(root)
@@ -46,6 +47,8 @@ export function renderVectors(root: HTMLElement): void {
 function bip340Table(): HTMLElement {
   let pass = 0
   let fail = 0
+  let roundTripsPassed = 0
+  let roundTripsFailed = 0
   const tbl = el('table')
   tbl.append(
     el('caption', {
@@ -104,6 +107,8 @@ function bip340Table(): HTMLElement {
         roundOk = false
         round = `threw: ${err instanceof Error ? err.message : 'error'}`
       }
+      if (roundOk) roundTripsPassed++
+      else roundTripsFailed++
     }
 
     const clsLabel =
@@ -137,14 +142,16 @@ function bip340Table(): HTMLElement {
   const c = card('BIP-340 official vectors', tableWrap('kat-caption', tbl))
   c.append(
     field('rows matching the published result', `${pass} of ${BIP340_VECTORS.length}`),
-    fail === 0
+    completeVectorSet(BIP340_VECTORS.map(v => v.index)) && fail === 0 && roundTripsPassed === 8 && roundTripsFailed === 0
       ? verdict(
           'pass',
           `All ${pass} published verify results reproduced`,
           'Both the expected and the computed verdict are printed on every row above, so this ' +
             'summary can be checked against the rows rather than taken on trust.',
         )
-      : verdict('fail', `${fail} rows disagree with the published result`, 'See the MISMATCH rows above.'),
+      : verdict('fail', 'Reference checks are incomplete or disagree',
+          `${fail} verify mismatches; ${roundTripsPassed} of 8 adaptor round trips passed. ` +
+          'The pinned reference requires all 19 distinct vector rows, including all eight signable cases.'),
   )
   c.append(
     el(
@@ -169,6 +176,7 @@ function bip340Table(): HTMLElement {
 function fixtureTable(): HTMLElement {
   let pass = 0
   let fail = 0
+  const results: FixtureResult[] = []
   const tbl = el('table')
   tbl.append(
     el('caption', {
@@ -211,6 +219,7 @@ function fixtureTable(): HTMLElement {
 
     const rowOk = sMatches && accepted && exOk
     rowOk ? pass++ : fail++
+    results.push({ id: f.id, deliberatelyWrong: !!f.deliberatelyWrong, sMatches, accepted, extracted: exOk })
 
     const tr = el('tr', f.deliberatelyWrong ? { class: 'row-wrong' } : {})
     tr.append(
@@ -233,7 +242,7 @@ function fixtureTable(): HTMLElement {
   c.append(
     field('rows passing', `${pass} of ${ADAPTOR_FIXTURES.length}`),
     field('rows expected to fail', `${expectedFail} (deliberately wrong)`),
-    fail === expectedFail
+    fixtureEvidenceAgrees(results)
       ? verdict(
           'pass',
           `${pass} correct rows pass and the ${expectedFail} deliberately wrong row fails`,
@@ -242,8 +251,10 @@ function fixtureTable(): HTMLElement {
         )
       : verdict(
           'alarm',
-          `${fail} rows failed; ${expectedFail} were expected to`,
-          'Either a correct fixture regressed or the deliberately wrong row stopped being wrong.',
+          'Fixture evidence does not match the expected outcomes',
+          `${fail} rows failed; ${expectedFail} were expected to. All six named rows must be present. ` +
+          'Each correct fixture must pass; only the deliberately wrong expected scalar must disagree. ' +
+          'Signature verification and extraction must still pass on that control row.',
         ),
   )
   c.append(

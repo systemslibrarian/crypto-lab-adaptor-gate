@@ -26,6 +26,82 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
+test.describe('student review regression controls', () => {
+  test('blank and out-of-range completion secrets are refused', async ({ page }) => {
+    await boot(page)
+    await page.getByText('Change the inputs', { exact: true }).click()
+    await page.locator('#btn-complete').click()
+    await expect(page.locator('#panel-relation .verdict-fail')).toContainText('Enter the adaptor secret t')
+    await openAllInspects(page, '#panel-relation')
+    await page.locator('#supply-t').fill('fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364142')
+    await page.locator('#btn-complete').click()
+    await expect(page.locator('#panel-relation .verdict-fail')).toContainText('[1, n-1]')
+    await expect(page.locator('#panel-relation .mech-sub.is-equal')).toHaveCount(0)
+  })
+
+  test('the opposite point never receives a successful extraction verdict', async ({ page }) => {
+    await boot(page)
+    await page.getByText('Change the inputs', { exact: true }).click()
+    await page.locator('#supply-t').fill('0b0b000000000000000000000000000000000000000000000000000000000001')
+    await page.locator('#btn-complete').click()
+    await expect(page.locator('#panel-relation')).toContainText('Extraction reported failure')
+    await expect(page.locator('#panel-relation')).not.toContainText('recovered t·G == T')
+    // The displayed equation equals its calculated difference even when that
+    // difference is not the original secret. It must not assert a false inequality.
+    await expect(page.locator('.mech-sub-eq')).toHaveText('=equals')
+    await expect(page.locator('.mech-sub-note')).toHaveText('not the secret behind T')
+  })
+
+  test('the displayed operation matches independently subtracted scalars in both parity branches', async ({ page }) => {
+    await boot(page)
+    const seen = new Set<string>()
+    const n = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141')
+    for (let t = 1; t <= 8; t++) {
+      await openAllInspects(page, '#panel-relation')
+      await page.locator('#t-input').fill(t.toString(16))
+      await page.locator('#btn-lock').click()
+      await page.locator('#btn-run').click()
+      await openAllInspects(page, '#panel-relation')
+      const parity = (await fieldValue(page, '#panel-relation', 'PARITY OF R + T')).trim()
+      seen.add(parity)
+      const sh = BigInt('0x' + await fieldFull(page, '#panel-relation', 'PRE-SIGNATURE)'))
+      const s = BigInt('0x' + await fieldFull(page, '#panel-relation', 'S (COMPLETED)'))
+      const shown = BigInt('0x' + await page.locator('.mech-sub-val').getAttribute('data-full'))
+      const expected = parity === 'even' ? (s - sh + n) % n : (sh - s + n) % n
+      expect(shown).toBe(expected)
+      await expect(page.locator('.mech-sub-op')).toHaveText(parity === 'even' ? 's − ŝ' : 'ŝ − s')
+      if (parity === 'odd') await expect(page.locator('#panel-relation')).toContainText('Subtract t and it becomes a signature')
+    }
+    expect([...seen].sort()).toEqual(['even', 'odd'])
+  })
+
+  test('a wrong fixture passing cannot cancel a correct fixture failing', async ({ page }) => {
+    // Fault injection is confined to one local HTTP response. Source and pinned
+    // fixtures stay unchanged throughout the test.
+    const good = '1e3d7a4eda1ac209fd8b02fe87293b5df88c5b316ee66caac7f156b5a12bfbac'
+    const wrong = '1e3d7a4eda1ac209fd8b02fe87293b5df88c5b316ee66caac7f156b5a12bfbad'
+    let changed = false
+    await page.route('**/assets/*.js', async route => {
+      const response = await route.fetch()
+      let body = await response.text()
+      const scalar = (hex: string) => new RegExp("\\bs:[\"'`]" + hex + "[\"'`]", 'g')
+      const goodMatches = [...body.matchAll(scalar(good))]
+      const wrongMatches = [...body.matchAll(scalar(wrong))]
+      expect(goodMatches.length, 'one correct fixture scalar in the bundle').toBe(1)
+      expect(wrongMatches.length, 'one deliberately wrong fixture scalar in the bundle').toBe(1)
+      const a = goodMatches[0][0], b = wrongMatches[0][0]
+      body = body.replace(a, 'FIXTURE_SWAP_PLACEHOLDER').replace(b, a).replace('FIXTURE_SWAP_PLACEHOLDER', b)
+      changed = true
+      await route.fulfill({ response, body })
+    })
+    await boot(page)
+    await page.getByRole('tab', { name: /^Vectors$/ }).click()
+    expect(changed).toBe(true)
+    await expect(page.locator('#panel-vectors')).toContainText('Fixture evidence does not match the expected outcomes')
+    await expect(page.locator('#panel-vectors')).not.toContainText('5 correct rows pass')
+  })
+})
+
 async function boot(page: Page): Promise<void> {
   page.setDefaultTimeout(20_000)
   await page.goto('.')

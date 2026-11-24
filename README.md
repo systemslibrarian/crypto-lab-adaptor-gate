@@ -2,7 +2,7 @@
 
 **BIP-340 Schnorr adaptor signatures · secp256k1**
 
-A pre-signature that becomes a real Schnorr signature only when a secret is added — and
+A pre-signature that becomes a real Schnorr signature when its holder supplies the secret — and
 completing it hands that secret to whoever held the pre-signature.
 
 **[Live demo](https://systemslibrarian.github.io/crypto-lab-adaptor-gate/)**
@@ -14,7 +14,8 @@ completing it hands that secret to whoever held the pre-signature.
 An adaptor signature is a signature with a piece missing. A signer produces a
 **pre-signature** that is provably bound to a public point `T`, and it is *not* a valid
 signature — BIP-340's own verifier rejects it. Whoever knows the secret `t` behind that
-point (`T = t·G`) can add `t` and turn it into a signature the real verifier accepts.
+point (`T = t·G`) can add or subtract `t`, according to the parity of `R + T`, and turn it
+into a signature the real verifier accepts.
 
 The one fact this lab exists to teach is what follows from that. For a pre-signature `ŝ`
 and its completed signature `s` on the same nonce commitment:
@@ -77,8 +78,8 @@ anything of value.
 
 1. **The Relation** — the headline, reachable in **one action**. Press *Run the relation*
    and four computed stages appear: lock a secret behind a point; pre-sign against it and
-   watch BIP-340 `verify` reject the pre-signature while pre-verification accepts it; add
-   `t` and get a signature the library accepts; subtract the two and read `t` back out. The
+   watch BIP-340 `verify` reject the pre-signature while pre-verification accepts it; apply
+   the parity-selected `±t` and get a signature the library accepts; subtract the two and read `t` back out. The
    mechanism is drawn as the dominant object, and the subtraction wears `t`'s colour only
    when the computed equality holds — **press *Try a wrong t* and it goes red**, which is
    what makes the green state evidence rather than decoration. Every raw value lives behind
@@ -100,8 +101,9 @@ anything of value.
    is exactly right, and the hop above it still cannot settle.
 4. **Break It** — the naive-nonce toggle makes two pre-signatures on one message share a
    nonce; the key falls out and a forged signature on a fresh message is accepted by the
-   library. A second toggle shows the edge case where the nonce *is* reused and the key is
-   still not recoverable.
+   library. A second toggle shows the edge case where the nonce *is* reused but the
+   two-equation subtraction is uninformative. This deliberately naive nonce is H(m),
+   which is public: a separate one-equation calculation still recovers the key.
 5. **Vectors & Fixtures** — BIP-340's 19 official vectors run live, and this lab's pinned
    adaptor fixtures. Every row prints the computed value beside the expected one whether or
    not they match, and **one fixture row is wrong on purpose** and reports failure.
@@ -159,9 +161,13 @@ all 19 BIP-340 vectors and the fixture table, including the row that fails on pu
   `R` produces a pre-signature that pre-verifies against the negation of the point it was
   built from — caught here by a test during the build.
 - **A nonce that does not bind `T`** lets two pre-signatures on one message share `R`, and
-  the key falls out. Note the precision: nonce reuse alone is not sufficient. The two
-  challenges must also differ, which means the two `T` must differ; reuse under a single `T`
-  yields `e₁ = e₂` and recovers nothing.
+  the key falls out in this fixed-message experiment. The two-equation attack needs
+  a nonzero challenge difference (or sum when the parities differ). With the same message
+  and `T`, the equations are identical and that subtraction recovers nothing. The naive
+  H(m) nonce has another flaw: it is publicly computable, so one pre-signature already
+  reveals `d = (ŝ − k_adj) / e mod n` when `e` is nonzero. A failed two-equation attack
+  therefore does not establish key secrecy. With other messages, even the same `T` can
+  have different challenges.
 - **Recovery is two equations, not one.** When both `R + T` parities agree the nonce
   cancels in the difference; when they differ it cancels in the **sum**. A recovery
   implementing only the difference branch silently fails on half its inputs.
@@ -224,12 +230,12 @@ Playwright browsers: `npx playwright install --with-deps chromium firefox webkit
 
 ```bash
 npm run build       # tsc --noEmit && vite build
-npm test            # 127 unit tests across 8 files (Vitest)
-npm run test:a11y   # 116 browser tests: axe WCAG gate, claims, visual snapshots,
+npm test            # 135 unit tests across 10 files (Vitest)
+npm run test:a11y   # 120 browser tests: axe WCAG gate, claims, visual snapshots,
                     # and functional flows in 4 browsers
 ```
 
-**Unit tests — 127, all passing.**
+**Unit tests — 135.**
 
 | suite | what it pins |
 |---|---|
@@ -241,6 +247,8 @@ npm run test:a11y   # 116 browser tests: axe WCAG gate, claims, visual snapshots
 | `src/crypto/swap.test.ts` | Swap atomicity, the ledger's real signature checks, and the wrong-`T` loss. |
 | `src/ci-pins.test.ts` | That CI's Playwright container tag still matches the installed `@playwright/test`, and that the preview port is a single literal all three config sites read. |
 | `src/crypto/ptlc.test.ts` | Per-hop decorrelation, and the **causality** of settlement: that each hop consumes the value extracted from the hop below it, and that corrupting a signature or a blinding stalls every hop upstream while leaving those downstream untouched. |
+| `src/crypto/student-review.test.ts` | Full-point extraction rejects the opposite point with the same x-coordinate, signature scalar zero remains in range, and a public nonce exposes the signing key from one pre-signature. |
+| `src/ui/evidence.test.ts` | Reference summaries require every named row and its expected outcome; missing rows, duplicates and offsetting failures cannot produce success. |
 
 **KAT files.** `src/vectors/bip340-test-vectors.csv`, vendored byte-for-byte from
 `bip-0340/test-vectors.csv` in `bitcoin/bips` with its provenance, sha256 and measured
@@ -249,13 +257,13 @@ Schnorr adaptor vectors** — neither BIP-327 nor secp256k1-zkp publishes any �
 lab's adaptor fixtures in `src/crypto/fixtures.ts` are self-derived, are never labelled
 official, and are guarded by the independent re-derivation above.
 
-**Browser gates — 116 tests.**
+**Browser gates — 120 tests.**
 
 - `e2e/a11y.spec.ts` — the axe-core WCAG 2.1 A/AA gate, run against the **production
   build** at desktop and 380px. Zero violations and zero `incomplete` findings; contrast is
   additionally computed arithmetically, and the non-text (1.4.11) baseline is **empty**,
   measured for this lab rather than inherited.
-- `e2e/claims.spec.ts` — 41 claims that the page tells the truth: cross-checks between
+- `e2e/claims.spec.ts` — 45 claims that the page tells the truth: cross-checks between
   surfaces, parts-sum-to-whole over the vector classes and fixture rows, and independent
   re-derivations evaluated in the browser with arithmetic sharing no code with the bundle.
   Includes the negative-claim fixture (every check green, funds gone, the limitation on
@@ -276,9 +284,10 @@ official, and are guarded by the independent re-derivation above.
   a semantic colour swap moved fewer pixels than the allowance and every snapshot still
   passed, so it was tightened until that mutation fails.
 
-Every rendered verdict has a matching source mutation recorded in `e2e/claims.spec.ts`,
-and each was run: the mutation was applied, the build confirmed to still succeed, the
-bundle hash confirmed to move, and the owning claim confirmed to fail.
+The original claim suite records its source-mutation targets in `e2e/claims.spec.ts`.
+The student-review controls additionally exercise blank and out-of-range input,
+opposite-point extraction, both parity branches, and two offsetting fixture errors
+in an isolated HTTP response. Unit controls cover missing and duplicated evidence.
 
 The CI workflow gates the Pages deploy on **all** of it — `npm test`, the build, then the
 full Playwright run — so a broken proof, a broken claim or an accessibility regression

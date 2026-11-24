@@ -250,7 +250,9 @@ export function extract(pre: PreSignature, signature: Uint8Array, expectedTx?: X
         reason: "the signature's nonce is not this pre-signature's x(R + T), so the two do not pair",
       }
     }
-    if (s <= 0n || s >= N) return { ok: false, reason: 's is outside [1, n-1]' }
+    // BIP-340's signature scalar is in [0, n-1]; zero is not a secret key,
+    // but is a permitted signature scalar (BIP-340, Verification).
+    if (s >= N) return { ok: false, reason: 's is outside [0, n-1]' }
 
     const t = pre.parity === 'even' ? mod(s - pre.sHat) : mod(pre.sHat - s)
     if (t === 0n) {
@@ -258,7 +260,9 @@ export function extract(pre: PreSignature, signature: Uint8Array, expectedTx?: X
     }
     const T = mulG(t, 'recovered t')
     const Tx = xOnly(T, 'recovered T')
-    if (expectedTx && !eqBytes(Tx, expectedTx)) {
+    // Equal x-coordinates also hold for -T. The x-only statement denotes the
+    // even-y lift, so compare complete points, not just their encodings.
+    if (expectedTx && !T.equals(liftX(expectedTx))) {
       return { ok: false, reason: 'recovered t*G does not equal the expected T' }
     }
     return { ok: true, t, Tx }

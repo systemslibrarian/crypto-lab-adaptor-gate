@@ -81,6 +81,12 @@ export function renderBreakIt(root: HTMLElement): void {
   )
   root.append(intro)
   root.append(toggles())
+  if (state.naive) root.append(card('Limit of this deliberately public nonce',
+    el('p', { class: 'note', text:
+      'This mode uses H(m) as its nonce, so anyone can compute it. Even one pre-signature ' +
+      'then exposes the key through d = (ŝ − k_adj) / e mod n when e is nonzero. ' +
+      'The two-signature calculation below isolates nonce reuse: choosing the same T ' +
+      'makes those two equations identical, but does not make this public nonce safe.' })))
 
   const sk = fromHex(SK_HEX)
   const { publicKey } = normaliseSecret(sk)
