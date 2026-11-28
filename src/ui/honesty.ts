@@ -107,8 +107,11 @@ export function renderHonesty(root: HTMLElement): void {
         el('li', {
           text:
             'The security of an honest pre-signature rests on the discrete logarithm problem in the ' +
-            'random-oracle model. Gerhart, Schröder, Soni and Thyagarajan re-prove Schnorr ' +
-            'adaptor signatures under strengthened definitions (EUROCRYPT 2024).',
+            'random-oracle model. Dai, Okamoto and Yamamoto strengthened extractability and ' +
+            'formalized on-chain unlinkability (INDOCRYPT 2022); Gerhart, Schröder, Soni and ' +
+            'Thyagarajan add pre-verify soundness and re-prove this concrete Schnorr construction ' +
+            'under their stronger framework (EUROCRYPT 2024). This lab does not prove every ' +
+            'generic definition.',
         }),
       ),
     ),
@@ -214,9 +217,17 @@ export function renderHonesty(root: HTMLElement): void {
         }),
         el('li', {
           text:
+            'Dai, Okamoto and Yamamoto, "Stronger Security and Generic Constructions for ' +
+            'Adaptor Signatures", INDOCRYPT 2022, LNCS 13774, pp. 52-77, ' +
+            'doi:10.1007/978-3-031-22912-1_3 — stronger extractability and the first ' +
+            'formalization of on-chain unlinkability between the 2021 and 2024 frameworks.',
+        }),
+        el('li', {
+          text:
             'Gerhart, Schröder, Soni and Thyagarajan, "Foundations of Adaptor Signatures", ' +
             'EUROCRYPT 2024, LNCS 14652 (Part II), pp. 161-189 (ePrint 2024/1809) — ' +
-            'strengthened definitions, with Schnorr adaptor signatures re-proved.',
+            'pre-verify soundness and strengthened definitions, with the concrete Schnorr ' +
+            'adaptor construction re-proved.',
         }),
         el('li', {
           text:
