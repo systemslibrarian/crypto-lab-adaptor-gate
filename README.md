@@ -34,8 +34,11 @@ keys, the even-y nonce rule — via `@noble/curves` 2.4.0. The adaptor layer
 (`preSign`, `preVerify`, `adapt`, `extract`) is this lab's own code written on top of the
 library's point and scalar operations, and the signature it finally produces is verified
 by the **library's unmodified BIP-340 `verify`**, never by this lab. The construction is
-the one formalized in Aumayr et al. (ASIACRYPT 2021) and re-proved under strengthened
-definitions in Gerhart et al. (EUROCRYPT 2024).
+the one formalized in Aumayr et al. (ASIACRYPT 2021). Dai, Okamoto and Yamamoto
+(INDOCRYPT 2022) then strengthened extractability and formalized on-chain unlinkability;
+Gerhart et al. (EUROCRYPT 2024) add pre-verify soundness and re-prove this concrete
+Schnorr construction under their stronger framework. This lab demonstrates that validated
+DLog/Schnorr instantiation, not every generic security notion.
 
 **The security model.** Security of an honest pre-signature rests on the discrete
 logarithm problem in the random-oracle model. The threat model shown in-page: the signer
